@@ -1,0 +1,6 @@
+work/
+runs/
+.env
+__pycache__/
+.wrangler/
+.DS_Store

@@ -1,0 +1,5 @@
+# Harness Report
+
+> One command that runs any AI agent harness from its GitHub repo in a sandbox and records every model call it makes, in one format, whatever the harness is.
+
+Not public yet. LinkedIn: https://www.linkedin.com/company/harnessreport/

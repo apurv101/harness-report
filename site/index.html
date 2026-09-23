@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Harness Report</title>
+    <meta name="description" content="Harness Report runs any AI agent harness from its GitHub repo in a sandbox and records every model call it makes, in one format, whatever the harness is." />
+    <meta name="robots" content="index, nofollow" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href="https://harnessreport.com/" />
+    <meta property="og:site_name" content="Harness Report" />
+    <meta property="og:title" content="Harness Report" />
+    <meta property="og:description" content="Harness Report runs any AI agent harness from its GitHub repo in a sandbox and records every model call it makes, in one format, whatever the harness is." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://harnessreport.com/" />
+    <meta name="twitter:card" content="summary" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --ground: #ffffff;
+        --ink: #0c1a2b;
+        --muted: #5a6b7d;
+        --line: #e0e7ee;
+        --accent: #0b5fd1;
+        --logo-ink: var(--ink);
+        --logo-accent: var(--accent);
+        --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+        --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ground: #0d1520;
+          --ink: #e8edf3;
+          --muted: #9baabc;
+          --line: #253243;
+          --accent: #5c9cff;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--ground);
+        color: var(--ink);
+        font-family: var(--sans);
+        font-size: 17px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+      .wrap { width: 100%; max-width: 640px; margin: 0 auto; padding: 0 24px; }
+      header.top { padding: 28px 0; }
+      .wordmark { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 700; letter-spacing: -0.01em; }
+      .wordmark:hover { text-decoration: none; }
+      .glyph { display: block; width: 38px; height: 38px; flex: none; }
+      main { flex: 1; display: flex; align-items: center; padding: 48px 0 72px; }
+      .eyebrow {
+        display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 500;
+        letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+        margin-bottom: 22px;
+      }
+      h1 { margin: 0 0 20px; font-size: clamp(30px, 5vw, 40px); line-height: 1.15; font-weight: 700; letter-spacing: -0.022em; text-wrap: balance; }
+      p { margin: 0 0 16px; }
+      p.lede { font-size: 19px; }
+      p.muted { color: var(--muted); }
+      .contact { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); }
+      footer { padding: 24px 0 32px; border-top: 1px solid var(--line); font-size: 14px; color: var(--muted); }
+      footer .row { display: flex; flex-wrap: wrap; gap: 8px 20px; justify-content: space-between; }
+    </style>
+  </head>
+  <body>
+    <header class="top">
+      <div class="wrap">
+        <a class="wordmark" href="/"><svg class="glyph" viewBox="0 0 72 72" aria-hidden="true" focusable="false"><rect x="13" y="9" width="46" height="54" rx="7" fill="none" stroke="var(--logo-ink, #0c1a2b)" stroke-width="3.5"/>
+<g stroke="var(--logo-ink, #0c1a2b)" stroke-width="3.5" stroke-linecap="round"><path d="M23 24h18M23 34h26M23 44h14"/></g>
+<circle cx="47" cy="47" r="6.5" fill="var(--logo-accent, #0b5fd1)"/></svg><span>Harness Report</span></a>
+      </div>
+    </header>
+    <main>
+      <div class="wrap">
+        <span class="eyebrow">One command</span>
+        <h1>Run any agent harness. Record every model call.</h1>
+        <p class="lede">Give it a GitHub repo that holds an AI agent harness and a task. It downloads the repo, has an AI write a Docker sandbox for it, builds the sandbox, puts a recording proxy between the harness and the model, and runs the task.</p>
+        <p class="muted">Every model call the harness makes is captured on the wire, in one format, whatever the harness is. The harness never holds credentials, and nothing in it is modified.</p>
+        <p class="muted">Not public yet. If you build harnesses, or measure them, we would like to hear from you.</p>
+        <div class="contact">
+          <p><a href="https://www.linkedin.com/company/harnessreport/" rel="me">Harness Report on LinkedIn</a></p>
+        </div>
+      </div>
+    </main>
+    <footer>
+      <div class="wrap row">
+        <span>Harness Report</span>
+        <span>© 2026 Harness Report</span>
+      </div>
+    </footer>
+  </body>
+</html>
