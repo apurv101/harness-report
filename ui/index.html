@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Harness Report · runs</title>
+<meta name="robots" content="noindex">
+<style>
+  :root {
+    color-scheme: light dark;
+    --ground: #ffffff; --panel: #f6f8fa; --ink: #0c1a2b; --muted: #5a6b7d; --line: #e0e7ee; --accent: #0b5fd1;
+    --ok: #1a7f4b; --bad: #c0392b; --warn: #b7791f;
+    --sys: #6b7280; --user: #0b5fd1; --asst: #7c3aed; --tool: #0f766e;
+    --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ground: #0d1520; --panel: #141e2b; --ink: #e8edf3; --muted: #9baabc; --line: #253243; --accent: #5c9cff;
+            --ok: #3ccf7a; --bad: #ff6b5b; --warn: #e0a83a; --sys: #9ca3af; --user: #5c9cff; --asst: #b48cff; --tool: #2dd4bf; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
+  header.top { padding: 18px 0; border-bottom: 1px solid var(--line); }
+  header.top .wrap { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .wordmark { display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 700; }
+  .wordmark:hover { text-decoration: none; }
+  .glyph { width: 28px; height: 28px; }
+  .crumb { color: var(--muted); font-family: var(--mono); font-size: 13px; }
+  main { padding: 24px 0 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 15px; margin: 24px 0 8px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+  .mono { font-family: var(--mono); font-size: 13px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  pre { margin: 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; max-height: 60vh; overflow: auto; }
+  code { font-family: var(--mono); font-size: 13px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  tr.row:hover { background: var(--panel); cursor: pointer; }
+  .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); }
+  .pill.ok { color: var(--ok); border-color: var(--ok); } .pill.bad { color: var(--bad); border-color: var(--bad); } .pill.warn { color: var(--warn); border-color: var(--warn); }
+  .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 18px; margin: 14px 0 0; padding: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .fact .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .fact .v { font-family: var(--mono); font-size: 13.5px; word-break: break-all; }
+  .help { border-bottom: 1px dotted var(--muted); cursor: help; }
+  .task { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 14px; white-space: pre-wrap; margin-top: 14px; }
+  nav.tabs { display: flex; gap: 4px; margin: 22px 0 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  nav.tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; font: inherit; color: var(--muted); cursor: pointer; margin-bottom: -1px; }
+  nav.tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
+  nav.tabs button .n { font-family: var(--mono); font-size: 12px; margin-left: 4px; color: var(--muted); }
+  .panel { display: none; } .panel.on { display: block; }
+  /* trajectory */
+  .msg { display: grid; grid-template-columns: 96px 1fr; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .msg .role { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding-top: 3px; }
+  .msg.system .role { color: var(--sys); } .msg.user .role { color: var(--user); } .msg.assistant .role { color: var(--asst); } .msg.tool .role { color: var(--tool); }
+  .msg .body { min-width: 0; }
+  .msg .text { white-space: pre-wrap; word-break: break-word; }
+  .msg pre { margin-top: 6px; }
+  .msg pre.cmd { border-left: 3px solid var(--asst); }
+  .msg pre.obs { border-left: 3px solid var(--tool); }
+  .clip { max-height: 260px; overflow: hidden; position: relative; }
+  .clip::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 40px; background: linear-gradient(transparent, var(--panel)); }
+  .more { display: inline-block; margin-top: 4px; font-size: 12px; color: var(--accent); cursor: pointer; background: none; border: 0; padding: 0; font-family: inherit; }
+  details { margin: 6px 0; } summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  select, input { font: inherit; font-size: 13px; padding: 3px 6px; background: var(--ground); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; }
+  .err { color: var(--bad); }
+  .empty { color: var(--muted); padding: 24px 0; }
+  @media (max-width: 640px) { .msg { grid-template-columns: 1fr; gap: 4px; } .wrap { padding: 0 16px; } }
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <a class="wordmark" href="/"><svg class="glyph" viewBox="0 0 72 72" aria-hidden="true"><rect x="13" y="9" width="46" height="54" rx="7" fill="none" stroke="currentColor" stroke-width="3.5"/><g stroke="currentColor" stroke-width="3.5" stroke-linecap="round"><path d="M23 24h18M23 34h26M23 44h14"/></g><circle cx="47" cy="47" r="6.5" fill="var(--accent)"/></svg><span>Harness Report</span></a>
+  <span class="crumb" id="crumb">runs</span>
+</div></header>
+<main><div class="wrap" id="app"><div class="empty">loading…</div></div></main>
+<script>
+'use strict';
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = n => n == null ? '—' : Number(n).toLocaleString();
+const kb = b => b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : (b / 1048576).toFixed(2) + ' MB';
+const app = $('#app'), crumb = $('#crumb');
+
+// ---------------------------------------------------------------- routing: /  |  /<run-id>
+const parts = location.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+if (parts.length === 0) showIndex();
+else if (parts.length === 1) showRun(parts[0]);
+else app.innerHTML = `<div class="empty">unknown path. Use <code>/&lt;run-id&gt;</code>.</div>`;
+
+async function getJSON(url) {
+  const r = await fetch(url); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); return r.json();
+}
+
+// ---------------------------------------------------------------- index
+// Each row is one runs/<run-id>/run.json: origin fields (kind, harness, task|prompt, model) + result fields once finished.
+async function showIndex() {
+  document.title = 'Harness Report · runs';
+  let runs; try { runs = await getJSON('/api/runs'); } catch (e) { app.innerHTML = `<div class="empty err">${esc(e.message)}</div>`; return; }
+  if (!runs.length) { app.innerHTML = '<div class="empty">no runs yet. Run <code>./run.sh &lt;github-url&gt; "&lt;task&gt;"</code> or <code>./run.sh &lt;github-url&gt; --taskset &lt;name&gt; --tasks &lt;a,b&gt;</code> first.</div>'; return; }
+  app.innerHTML = `<h1>Runs</h1><p class="muted small">${runs.length} run${runs.length === 1 ? '' : 's'} · one folder each under <code>runs/</code>, described by its <code>run.json</code> · open one by URL: <code>/&lt;run-id&gt;</code></p>
+    <table><thead><tr>${['run', 'kind', 'harness', 'task', 'model', 'status', 'reward', 'calls', 'tokens in / out', 's'].map(h => `<th class="${['reward', 'calls', 'tokens in / out', 's'].includes(h) ? 'num' : ''}">${label(h)}</th>`).join('')}</tr></thead><tbody>
+    ${runs.map(r => `<tr class="row" onclick="location.href='/${esc(r.run)}'">
+      <td class="mono"><a href="/${esc(r.run)}">${esc(r.run)}</a></td>
+      <td>${kindPill(r)}</td>
+      <td class="mono small">${esc(r.harness?.name || '')}</td>
+      <td class="small">${esc(taskText(r).slice(0, 90))}${taskText(r).length > 90 ? '…' : ''}</td>
+      <td class="mono small">${esc(shortModel(r.model))}</td>
+      <td>${statusPill(r)}</td>
+      <td class="num">${rewardCell(r)}</td>
+      <td class="num">${fmt(r.calls)}</td><td class="num">${fmt(r.input_tokens)} / ${fmt(r.output_tokens)}</td><td class="num">${fmt(r.seconds)}</td></tr>`).join('')}
+    </tbody></table>`;
+}
+function shortModel(m) { return (m || '').replace(/^bedrock\//, '').replace(/^us\.anthropic\./, ''); }
+function taskText(r) { return r.kind === 'harbor' ? `${r.task?.taskset || ''} / ${r.task?.name || ''}` : (r.prompt || ''); }
+function kindPill(r) { return r.kind ? `<span class="pill">${esc(r.kind)}</span>` : '<span class="pill warn">no run.json</span>'; }
+function statusPill(r) {
+  if (!r.has_run_json) return '<span class="pill warn">no run.json</span>';
+  if (!r.finished) return '<span class="pill warn">unfinished</span>';
+  if (r.rc === 0) return `<span class="pill ok">rc 0</span>${r.errors ? ` <span class="pill bad">${r.errors} proxy err</span>` : ''}`;
+  return `<span class="pill bad">rc ${esc(r.rc)}</span>`;
+}
+function rewardCell(r) {
+  if (r.kind !== 'harbor') return '<span class="muted">—</span>';
+  if (r.reward == null) return r.finished ? '<span class="pill warn">none</span>' : '<span class="muted">…</span>';
+  return `<span class="pill ${Number(r.reward) > 0 ? 'ok' : 'bad'}">${esc(r.reward)}</span>`;
+}
+
+// ---------------------------------------------------------------- one run
+async function showRun(rid) {
+  let b; try { b = await getJSON(`/api/run/${encodeURIComponent(rid)}`); }
+  catch (e) { app.innerHTML = `<div class="empty err">${esc(e.message)}: ${esc(rid)}</div>`; return; }
+  const rj = b.run_json, h = rj.harness || {}, t = rj.task || {}, calls = b.calls, harbor = rj.kind === 'harbor';
+  document.title = `${b.run} · ${h.name || ''}`;
+  crumb.innerHTML = `<a href="/">runs</a> / ${esc(b.run)}`;
+  const repoLink = h.repo ? `<a href="${esc(h.repo)}${h.commit ? '/tree/' + esc(h.commit) : ''}" target="_blank" rel="noopener">${esc(h.repo.replace('https://github.com/', ''))}</a>` : '—';
+  const calc = { in: calls.reduce((a, c) => a + (c.usage?.input_tokens || 0), 0), out: calls.reduce((a, c) => a + (c.usage?.output_tokens || 0), 0), err: calls.filter(c => c.error).length, ms: calls.reduce((a, c) => a + (c.latency_ms || 0), 0) };
+
+  app.innerHTML = `
+    <h1 class="mono">${esc(b.run)}</h1>
+    <div class="muted">${kindPill(rj)} ${repoLink}${h.commit ? ` <span class="mono small">@ ${esc(h.commit.slice(0, 10))}</span>` : ''} · ${statusPill(rj)}${harbor ? ' · reward ' + rewardCell(rj) : ''}</div>
+    <h2><span class="help" title="The half of run.json written before anything ran: what harness, what task, what model. A run that died mid-way still has this.">Origin</span></h2>
+    <div class="facts">
+      ${fact('kind', rj.kind)}${fact('harness', h.name)}${fact('api', h.api_style)}
+      ${harbor ? fact('taskset', t.taskset) + fact('task', t.name) : fact('task', 'prompt (below)')}
+      ${fact('model', shortModel(rj.model))}${fact('workdir', rj.workdir)}${fact('started', rj.started)}
+    </div>
+    ${harbor && t.taskset_dir ? `<p class="muted small mono">task folder: ${esc(t.taskset_dir)}/${esc(t.name)}</p>` : ''}
+    <h2><span class="help" title="The half of run.json merged in when the run ended: exit code, timing, reward, and the call and token totals from the proxy.">Result</span></h2>
+    <div class="facts">
+      ${fact('finished', rj.finished || 'not yet')}${fact('exit code', rj.rc)}${fact('wall time', rj.seconds != null ? rj.seconds + ' s' : null)}
+      ${harbor ? fact('reward', rj.reward) + fact('verifier rc', rj.verifier_rc) : ''}
+      ${fact('model calls', calls.length + (b.calls_unparsed ? ` (+${b.calls_unparsed} unparsed)` : ''))}${fact('tokens in', fmt(calc.in))}${fact('tokens out', fmt(calc.out))}
+      ${fact('model time', (calc.ms / 1000).toFixed(1) + ' s')}${fact('proxy errors', calc.err)}
+      ${fact('model requested', calls[0]?.model_requested)}${fact('first call', calls[0]?.ts)}
+    </div>
+    <h2>${harbor ? 'Instruction' : 'Prompt'}</h2><div class="task">${esc(b.task || rj.prompt || '(no task.txt)')}</div>
+    <nav class="tabs">
+      <button data-t="traj" class="on">Trajectory</button>
+      <button data-t="calls">Calls<span class="n">${calls.length}</span></button>
+      ${harbor ? '<button data-t="verifier">Verifier</button>' : ''}
+      <button data-t="logs">Logs</button>
+      <button data-t="recipe">Recipe</button>
+      <button data-t="run">run.json</button>
+      <button data-t="files">Files<span class="n">${b.files.length}</span></button>
+    </nav>
+    <section class="panel on" id="p-traj"></section>
+    <section class="panel" id="p-calls"></section>
+    <section class="panel" id="p-verifier"></section>
+    <section class="panel" id="p-logs"></section>
+    <section class="panel" id="p-recipe"></section>
+    <section class="panel" id="p-run"><h2>run.json <span class="muted" style="text-transform:none;letter-spacing:0">origin written before the run, result merged in after</span></h2><pre>${esc(JSON.stringify(rj, null, 2))}</pre></section>
+    <section class="panel" id="p-files"></section>`;
+
+  $('nav.tabs').addEventListener('click', e => {
+    const bt = e.target.closest('button'); if (!bt) return;
+    document.querySelectorAll('nav.tabs button').forEach(x => x.classList.toggle('on', x === bt));
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('on', p.id === 'p-' + bt.dataset.t));
+    location.hash = bt.dataset.t;
+  });
+  renderTrajectory(b); renderCalls(b); renderRecipe(b); renderLogs(b); renderFiles(b); if (harbor) renderVerifier(b);
+  const h2 = location.hash.slice(1); if (h2 && $(`nav.tabs button[data-t="${h2}"]`)) $(`nav.tabs button[data-t="${h2}"]`).click();
+}
+// Definitions shown as hover tooltips on fact labels and table headers. Keep them in one place.
+const HELP = {
+  'kind': 'prompt: the task was free text; nothing verifies it unless the run was judged. harbor: a Harbor task folder; the task\'s own tests/test.sh grades the result.',
+  'reward': 'What the verifier wrote to reward.txt. Harbor: 1 = all tests passed, 0 = not (some tasks give a fraction). LLM judge: fraction of rubric criteria met, 0 to 1. Not an exit code.',
+  'verifier rc': 'Exit status of the verifier process itself (tests/test.sh, or the judge step), separate from the reward. 0 = it ran to completion. 124 or 142 = it hit its timeout. Anything else = the verifier broke. reward 0 with rc 0 is a clean fail; no reward with rc != 0 is an infrastructure problem, not an agent failure.',
+  'exit code': 'The harness\'s own exit status inside the sandbox (rc in run.json). 124 or 142 = the agent hit its time budget. Says nothing about whether the task was solved; the reward does.',
+  'status': 'rc = the harness\'s exit status inside the sandbox. unfinished = run.json has no result half yet (still running, or the runner died). proxy err = model calls the proxy could not complete upstream.',
+  'wall time': 'Seconds for the agent phase only: from starting the run command to its exit. The verifier is not included.',
+  's': 'Seconds for the agent phase only, verifier not included.',
+  'model calls': 'Requests the harness made to the model, as recorded by the proxy on the wire (one line each in calls.jsonl).',
+  'calls': 'Model requests recorded by the proxy (lines in calls.jsonl).',
+  'tokens in': 'Input tokens summed over all calls, from the model\'s usage report. Each turn resends the whole conversation, so this grows quadratically with the number of turns.',
+  'tokens out': 'Output tokens summed over all calls, from the model\'s usage report.',
+  'tokens in / out': 'Input and output tokens summed over all recorded calls, from the model\'s usage report. Input counts the whole conversation resent on every turn.',
+  'model time': 'Sum of the per-call latency the proxy measured (request in to response out). The rest of wall time is the harness running commands.',
+  'proxy errors': 'Calls the proxy could not complete upstream (Bedrock error or timeout). The harness saw an error response for these.',
+  'model requested': 'The model name the harness sent on the wire. The proxy replaced it with the configured model; see run.json model.',
+  'model': 'The model the proxy actually called, from .env MODEL. The name the harness asked for is under model requested.',
+  'api': 'Which API shape the harness spoke to the proxy: openai (chat completions) or anthropic (messages). From the recipe.',
+  'workdir': 'Directory the agent ran in inside the sandbox. Harbor: the task image\'s WORKDIR. Prompt: the recipe\'s workdir, usually /work.',
+  'harness': 'owner-repo slug of the GitHub repo that was packaged; the recipe and overlay image are cached under this name.',
+  'taskset': 'The Harbor taskset directory the task came from.',
+  'task': 'Harbor: the task folder name. Prompt: the text given on the command line (shown in full below).',
+  'started': 'When run.sh wrote the origin half of run.json, just before the proxy started.',
+  'finished': 'When the result half was merged into run.json, after the verifier (if any). "not yet" means the run is still going or the runner died.',
+  'first call': 'Timestamp of the first model call the proxy recorded.',
+  'run': 'Folder name under runs/: timestamp or --run-id, plus -<task> and -k<i> for a Harbor task.',
+};
+function label(k) { return HELP[k] ? `<span class="help" title="${esc(HELP[k])}">${esc(k)}</span>` : esc(k); }
+function fact(k, v) { return `<div class="fact"><div class="k">${label(k)}</div><div class="v">${v == null || v === '' ? '—' : esc(v)}</div></div>`; }
+
+// ---------------------------------------------------------------- trajectory (reconstructed from one call's request + response)
+// In an agent loop every request carries the whole conversation so far, so the last call is the full trajectory.
+function renderTrajectory(b) {
+  const el = $('#p-traj'), calls = b.calls;
+  if (!calls.length) { el.innerHTML = '<div class="empty">no model calls were recorded (calls.jsonl is empty or missing).</div>'; return; }
+  const draw = idx => {
+    const c = calls[idx];
+    el.innerHTML = `<div class="toolbar">conversation as sent in call
+      <select id="callpick">${calls.map((x, i) => `<option value="${i}" ${i === idx ? 'selected' : ''}>${x.n ?? i + 1} of ${calls.length}${x.error ? ' (error)' : ''}</option>`).join('')}</select>
+      <span>· ${c.route} · ${fmt(c.usage?.input_tokens)} in / ${fmt(c.usage?.output_tokens)} out · ${fmt(c.latency_ms)} ms</span>
+      <label><input type="checkbox" id="showsys" checked> system prompt</label></div>
+      <div id="msgs">${conversation(c).map(msgHTML).join('')}</div>`;
+    $('#callpick', el).onchange = e => draw(+e.target.value);
+    $('#showsys', el).onchange = e => el.querySelectorAll('.msg.system').forEach(m => m.style.display = e.target.checked ? '' : 'none');
+    wireClips(el);
+  };
+  draw(calls.length - 1);
+}
+
+// Normalise both API shapes to [{role, text, calls:[{name,args,pretty}], results:[{id,text}], final}]
+function conversation(c) {
+  const req = c.request || {}, out = [];
+  const text = v => typeof v === 'string' ? v : Array.isArray(v) ? v.map(p => typeof p === 'string' ? p : p?.type === 'text' ? p.text : p?.type === 'image_url' || p?.type === 'image' ? '[image]' : JSON.stringify(p)).join('\n') : v == null ? '' : JSON.stringify(v);
+  if (c.route === 'openai') {
+    for (const m of req.messages || []) {
+      if (m.role === 'system' || m.role === 'developer') out.push({ role: 'system', text: text(m.content) });
+      else if (m.role === 'user') out.push({ role: 'user', text: text(m.content) });
+      else if (m.role === 'assistant') out.push({ role: 'assistant', text: text(m.content), calls: (m.tool_calls || []).map(tc => toolCall(tc.function?.name, tc.function?.arguments)) });
+      else if (m.role === 'tool') out.push({ role: 'tool', results: [{ id: m.tool_call_id, text: text(m.content) }] });
+      else out.push({ role: m.role, text: text(m.content) });
+    }
+    const rm = c.response?.choices?.[0]?.message;
+    if (rm) out.push({ role: 'assistant', final: true, text: text(rm.content), calls: (rm.tool_calls || []).map(tc => toolCall(tc.function?.name, tc.function?.arguments)) });
+  } else {
+    if (req.system) out.push({ role: 'system', text: text(req.system) });
+    const blocks = m => {
+      const bs = Array.isArray(m.content) ? m.content : [{ type: 'text', text: m.content }];
+      const r = { role: m.role, text: '', calls: [], results: [] };
+      for (const bl of bs) {
+        if (bl.type === 'text') r.text += (r.text ? '\n' : '') + bl.text;
+        else if (bl.type === 'tool_use') r.calls.push(toolCall(bl.name, bl.input));
+        else if (bl.type === 'tool_result') r.results.push({ id: bl.tool_use_id, text: text(bl.content), is_error: bl.is_error });
+        else if (bl.type === 'thinking') r.text += (r.text ? '\n' : '') + '[thinking] ' + (bl.thinking || '');
+        else r.text += (r.text ? '\n' : '') + JSON.stringify(bl);
+      }
+      if (m.role === 'user' && r.results.length && !r.text) r.role = 'tool';
+      return r;
+    };
+    for (const m of req.messages || []) out.push(blocks(m));
+    if (c.response?.content) out.push({ ...blocks({ role: 'assistant', content: c.response.content }), final: true });
+  }
+  if (c.error) out.push({ role: 'assistant', final: true, error: c.error });
+  return out;
+}
+function toolCall(name, args) {
+  let a = args, pretty = null;
+  if (typeof a === 'string') { try { a = JSON.parse(a); } catch { pretty = a; } }
+  if (pretty == null && a && typeof a === 'object') {
+    const keys = Object.keys(a);
+    const main = a.command ?? a.cmd ?? a.code ?? a.script ?? null;
+    pretty = (keys.length === 1 && typeof main === 'string') ? main : JSON.stringify(a, null, 2);
+  }
+  return { name: name || 'tool', pretty: pretty ?? String(args ?? '') };
+}
+function msgHTML(m) {
+  const role = m.role === 'tool' ? 'tool' : m.role, label = m.final ? 'assistant<br><span class="muted">(reply)</span>' : role === 'tool' ? 'observation' : role;
+  let body = '';
+  if (m.error) body += `<div class="err">proxy error: ${esc(m.error)}</div>`;
+  if (m.text) body += `<div class="text">${clipHTML(m.text, role === 'system' ? 900 : 4000)}</div>`;
+  for (const c of m.calls || []) body += `<pre class="cmd"><span class="muted">${esc(c.name)} $</span> ${esc(c.pretty)}</pre>`;
+  for (const r of m.results || []) { const o = observation(r.text); body += `<pre class="obs${r.is_error ? ' err' : ''}">${o.head ? `<span class="muted">${esc(o.head)}</span>\n` : ''}${clipHTML(o.text, 2500, true)}</pre>`; }
+  if (!body) body = '<span class="muted">(empty)</span>';
+  return `<div class="msg ${esc(role)}"><div class="role">${label}</div><div class="body">${body}</div></div>`;
+}
+// Tool results are often JSON like {"returncode":0,"output":"..."}; show the output as text with the rest as a one-line head.
+function observation(t) {
+  try { const o = JSON.parse(t); if (o && typeof o === 'object' && !Array.isArray(o)) {
+    const k = ['output', 'stdout', 'result', 'content', 'text'].find(k => typeof o[k] === 'string');
+    if (k) { const rest = Object.entries(o).filter(([x]) => x !== k).map(([x, v]) => `${x}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join('  '); return { head: rest, text: o[k] }; }
+  } } catch {}
+  return { head: '', text: t };
+}
+// Long text is clipped with a "show all" button; the full text is kept in a data attribute.
+function clipHTML(s, n, raw) {
+  s = String(s); if (s.length <= n) return esc(s);
+  return `<span class="clipped">${esc(s.slice(0, n))}</span><span class="rest" hidden>${esc(s.slice(n))}</span>${raw ? '\n' : ''}<button class="more" data-n="${s.length - n}">… show ${fmt(s.length - n)} more chars</button>`;
+}
+function wireClips(root) {
+  root.querySelectorAll('button.more').forEach(bt => bt.onclick = () => { const rest = bt.previousElementSibling; rest.hidden = !rest.hidden; bt.textContent = rest.hidden ? `… show ${fmt(bt.dataset.n)} more chars` : 'show less'; });
+}
+
+// ---------------------------------------------------------------- calls table with raw request/response per call
+function renderCalls(b) {
+  const el = $('#p-calls'), calls = b.calls;
+  if (!calls.length) { el.innerHTML = '<div class="empty">no calls recorded.</div>'; return; }
+  el.innerHTML = `<table><thead><tr><th class="num">#</th><th>time</th><th>route</th><th>path</th><th>requested → used</th><th>stream</th><th class="num">ms</th><th class="num">in</th><th class="num">out</th><th>msgs</th><th>stop</th><th>error</th></tr></thead>
+    <tbody>${calls.map((c, i) => `<tr class="row" data-i="${i}"><td class="num">${c.n ?? i + 1}</td><td class="mono small">${esc((c.ts || '').replace('T', ' '))}</td><td>${esc(c.route)}</td><td class="mono small">${esc(c.path)}</td>
+      <td class="mono small">${esc(c.model_requested)} → ${esc(shortModel(c.model))}</td><td>${c.stream ? 'yes' : ''}</td><td class="num">${fmt(c.latency_ms)}</td><td class="num">${fmt(c.usage?.input_tokens)}</td><td class="num">${fmt(c.usage?.output_tokens)}</td>
+      <td class="num">${(c.request?.messages || []).length}</td><td class="mono small">${esc(stopReason(c))}</td><td class="err small">${esc(c.error || '')}</td></tr>
+      <tr class="detail" data-i="${i}" hidden><td colspan="12"><details open><summary>request</summary><pre>${esc(JSON.stringify(c.request, null, 2))}</pre></details><details open><summary>response</summary><pre>${esc(JSON.stringify(c.response ?? c.error, null, 2))}</pre></details></td></tr>`).join('')}</tbody></table>`;
+  el.querySelectorAll('tr.row').forEach(tr => tr.onclick = () => { const d = el.querySelector(`tr.detail[data-i="${tr.dataset.i}"]`); d.hidden = !d.hidden; });
+}
+function stopReason(c) { return c.response?.choices?.[0]?.finish_reason ?? c.response?.stop_reason ?? ''; }
+
+// ---------------------------------------------------------------- recipe
+function renderRecipe(b) {
+  const el = $('#p-recipe'), r = b.recipe;
+  if (!r) { el.innerHTML = '<div class="empty">no recipe.json in this run.</div>'; return; }
+  el.innerHTML = `
+    ${r.summary ? `<h2>Summary</h2><div class="text">${esc(r.summary)}</div>` : ''}
+    <div class="facts">${fact('api style', r.api_style)}${fact('base image', r.base_image)}${fact('ad-hoc workdir', r.workdir || '/work')}</div>
+    <h2>Run command</h2><pre>${esc(b.command || r.run_command || '')}</pre>
+    ${r.check_command ? `<h2>Check command</h2><pre>${esc(r.check_command)}</pre>` : ''}
+    <h2>Environment</h2><table><thead><tr><th>name</th><th>value</th></tr></thead><tbody>${(r.env || []).map(e => `<tr><td class="mono">${esc(e.name)}</td><td class="mono">${esc(e.value)}</td></tr>`).join('')}</tbody></table>
+    ${r.dockerfile ? `<h2>Dockerfile</h2><pre>${esc(r.dockerfile)}</pre>` : ''}
+    ${r.notes ? `<h2>Notes</h2><div class="text" style="white-space:pre-wrap">${esc(r.notes)}</div>` : ''}`;
+}
+
+// ---------------------------------------------------------------- logs
+function renderLogs(b) {
+  const el = $('#p-logs');
+  const block = logBlock;
+  el.innerHTML = block('stdout.log', b.stdout) + block('stderr.log', b.stderr) + block('proxy.log', b.proxy);
+}
+function logBlock(title, s) { return `<h2>${title} <span class="muted" style="text-transform:none;letter-spacing:0">${s == null ? '(missing)' : kb(new Blob([s]).size)}</span></h2>${s ? `<pre>${esc(s)}</pre>` : '<div class="muted small">empty</div>'}`; }
+
+// ---------------------------------------------------------------- verifier (Harbor runs: tests/test.sh output and the reward it wrote)
+function renderVerifier(b) {
+  const el = $('#p-verifier'), v = b.verifier, rj = b.run_json;
+  if (!v) { el.innerHTML = '<div class="empty">no verifier/ folder: the run did not reach the verify stage.</div>'; return; }
+  el.innerHTML = `<div class="facts">${fact('reward', (v['reward.txt'] || '').trim() || null)}${fact('verifier rc', rj.verifier_rc)}${fact('taskset', rj.task?.taskset)}${fact('task', rj.task?.name)}</div>
+    ${logBlock('verifier/stdout.log', v['stdout.log'])}${logBlock('verifier/stderr.log', v['stderr.log'])}`;
+}
+
+// ---------------------------------------------------------------- files
+function renderFiles(b) {
+  const el = $('#p-files');
+  el.innerHTML = `<table><thead><tr><th>file</th><th class="num">size</th><th></th></tr></thead><tbody>${b.files.map(f =>
+    `<tr><td class="mono"><a href="/raw/${esc(b.run)}/${esc(f.name)}" target="_blank">${esc(f.name)}</a>${f.core ? '' : ' <span class="muted small">(written by the harness)</span>'}</td><td class="num">${kb(f.bytes)}</td><td class="small muted">${f.core ? '' : 'raw'}</td></tr>`).join('')}</tbody></table>
+    <p class="muted small">Folder: <code>runs/${esc(b.run)}/</code></p>`;
+}
+</script>
+</body>
+</html>
