@@ -17,6 +17,15 @@
 #   --rebuild     re-clone, re-analyze and rebuild the harness overlay
 #   --run-id ID   name the run (default: timestamp)
 #   --model M     model for this invocation, e.g. bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0 (default: MODEL in .env)
+#   --routes R    per-model routing, pattern=target,... first match wins, MODEL for the rest (default: ROUTES in .env)
+#                 targets: bedrock/<id> | anthropic[/<id>] | openai[/<id>]; no /<id> keeps the model the harness asked for
+#                 e.g. --routes 'claude-haiku*=anthropic,gpt-4o-mini=openai/gpt-4.1-mini'
+#   --egress E    record (default): the sandbox's only way out is the proxy, every connection logged to egress.jsonl
+#                 none | allow:a.com,b.org: refuse everything / everything else (the verifier phase is always open)
+#                 inspect: record + TLS interception with a per-run CA; bodies in egress/   open: no isolation (old behaviour)
+#   --policy P    flag (default): tool calls that touch the tests, git history, the network or rm -rf are flagged in
+#                 calls.jsonl and run.json   enforce: flagged actions are rewritten to fail   off
+#   --block-url R refuse URLs matching regex R (repeatable; hosts only unless --egress inspect or plain http)
 #
 # Stages:   fetch     git clone → work/<name>/repo
 #           select    resolve the Harbor tasks; skip multi-container (docker-compose) ones; build the first task image
@@ -34,8 +43,9 @@
 # adds verifier/. run.json says where the run came from (kind prompt|harbor, harness repo+commit, task, model) — written
 # before the run starts — and gets rc, seconds, reward, calls and tokens merged in when it ends. `./run.sh runs` lists them.
 #
-# .env holds MODEL (bedrock/<model-id>), AWS_PROFILE, AWS_REGION; optional ANALYZER_MODEL (claude -p model) and
-# HARBOR_TASKS (default ~/Desktop/harbor-tasks).
+# .env holds MODEL (a target, e.g. bedrock/<model-id>), AWS_PROFILE, AWS_REGION (needed when any target is Bedrock);
+# optional ROUTES, ANTHROPIC_API_KEY / OPENAI_API_KEY (+ ANTHROPIC_BASE_URL / OPENAI_BASE_URL) for the passthrough
+# targets, ANALYZER_MODEL (claude -p model) and HARBOR_TASKS (default ~/Desktop/harbor-tasks).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 die() { echo "run.sh: $*" >&2; exit 2; }
@@ -152,12 +162,18 @@ PY
 fi
 
 # ------------------------------------------------------------------ args
+EGRESS="${EGRESS:-record}"; POLICY="${POLICY:-flag}"; BLOCK_URLS="${BLOCK_URLS:-}"
 URL=""; TASK=""; TASK_FILE=""; REBUILD=0; RUN_ID=""; TASKSET=""; TASK_NAMES=""; GREP=""; LIMIT=""; ALL=0; K=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --rebuild) REBUILD=1 ;;
     --run-id) RUN_ID="${2:?}"; shift ;;
     --model) MODEL="${2:?}"; shift ;;
+    --routes) ROUTES="${2:?}"; shift ;;
+    --egress) EGRESS="${2:?}"; shift ;;
+    --policy) POLICY="${2:?}"; shift ;;
+    --block-url) BLOCK_URLS="${BLOCK_URLS:+$BLOCK_URLS
+}${2:?}"; shift ;;
     --task-file) TASK_FILE="${2:?}"; shift ;;
     --taskset) TASKSET="${2:?}"; shift ;;
     --tasks) TASK_NAMES="${2:?}"; shift ;;
@@ -180,7 +196,12 @@ else
   [ -z "$TASK_NAMES$GREP$LIMIT" ] && [ "$ALL" = 0 ] || die "--tasks/--grep/--limit/--all need --taskset"
 fi
 [ -f "$HERE/.env" ] || die "no .env (MODEL, AWS_PROFILE, AWS_REGION)"
-: "${MODEL:?MODEL in .env or --model}"; : "${AWS_PROFILE:?AWS_PROFILE in .env}"; AWS_REGION="${AWS_REGION:-us-west-2}"
+: "${MODEL:?MODEL in .env or --model}"; ROUTES="${ROUTES:-}"; AWS_REGION="${AWS_REGION:-us-west-2}"
+uses_bedrock() { local t; for t in "$MODEL" $(printf '%s' "$ROUTES" | tr ',' '\n' | sed -n 's/^[^=]*=//p'); do
+  case "$t" in anthropic|anthropic/*|openai|openai/*) ;; *) return 0 ;; esac; done; return 1; }
+case "$EGRESS" in record|none|inspect|open|allow:?*) ;; *) die "--egress: record | none | allow:<hosts> | inspect | open" ;; esac
+case "$POLICY" in flag|enforce|off) ;; *) die "--policy: flag | enforce | off" ;; esac
+if uses_bedrock; then : "${AWS_PROFILE:?AWS_PROFILE in .env (a route uses Bedrock)}"; fi
 docker info >/dev/null 2>&1 || die "Docker is not running"
 command -v claude >/dev/null || die "claude CLI not found (the analyze stage runs claude -p)"
 
@@ -272,9 +293,10 @@ THE PROXY CONTRACT
 - The proxy is reachable from the container at \$PROXY_URL (literal string; it is substituted at run time). It speaks BOTH
   the OpenAI chat-completions API (\$PROXY_URL/v1/chat/completions, list at \$PROXY_URL/v1/models) and the Anthropic
   messages API (\$PROXY_URL/v1/messages). Streaming and tool calling work on both. Any API key string is accepted.
-- Whatever model name the harness sends is replaced by the real model on the far side, so pick a model name the harness
-  accepts without complaint locally (e.g. for litellm use an 'openai/<name>' or 'anthropic/<name>' prefix so the base URL
-  applies; for the OpenAI SDK any name; for the Anthropic SDK a claude name).
+- The proxy routes each call by the model name the harness sends: it may serve that exact model or swap it for another.
+  So keep the harness's own default model name(s) where it has them (a harness that uses several models for different
+  roles must keep sending distinct names); only if it has none, pick a real model name it accepts (e.g. for litellm use
+  an 'openai/<name>' or 'anthropic/<name>' prefix so the base URL applies; for the Anthropic SDK a claude name).
 - The harness must NOT need any cloud credentials or network access other than the proxy at run time.
   Typical env: OPENAI_BASE_URL=\$PROXY_URL/v1 + OPENAI_API_KEY=proxy, or ANTHROPIC_BASE_URL=\$PROXY_URL + ANTHROPIC_API_KEY=proxy,
   plus whatever variable this harness uses to choose the model, plus anything that skips first-run wizards, telemetry,
@@ -381,10 +403,13 @@ done
 [ "$OK" = 1 ] || die "could not build a working sandbox after 3 attempts; see work/$NAME/{build.log,check.log,analyze.stderr}"
 
 # ------------------------------------------------------------------ 5. proxy image (one per invocation; one container per run)
-stage proxy "proxy image hr-proxy, model=$MODEL"
+stage proxy "proxy image hr-proxy, model=$MODEL${ROUTES:+  routes=$ROUTES}  egress=$EGRESS  policy=$POLICY"
 docker network inspect hr-net >/dev/null 2>&1 || docker network create hr-net >/dev/null
-PCTX="$WORK/.proxy-ctx"; mkdir -p "$PCTX"; cp "$HERE/proxy.py" "$PCTX/"
-printf 'FROM python:3.12-slim\nRUN pip install -q --root-user-action=ignore boto3\nCOPY proxy.py /proxy.py\nCMD ["python3","-u","/proxy.py"]\n' > "$PCTX/Dockerfile"
+# hr-int has no route out: a harness container on it reaches the world only through the proxy, which sits on both
+docker network inspect hr-int >/dev/null 2>&1 || docker network create --internal hr-int >/dev/null
+CONTROL_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"   # lets run.sh (not the harness) open the verify phase
+PCTX="$WORK/.proxy-ctx"; mkdir -p "$PCTX"; cp "$HERE/proxy.py" "$HERE/policy.py" "$PCTX/"
+printf 'FROM python:3.12-slim\nRUN pip install -q --root-user-action=ignore boto3 cryptography\nCOPY proxy.py policy.py /\nCMD ["python3","-u","/proxy.py"]\n' > "$PCTX/Dockerfile"
 docker build -q -t hr-proxy "$PCTX" >/dev/null
 CUR_PROXY=""; CUR_RUN=""; CUR_OUT=""
 finish_containers() {
@@ -396,14 +421,34 @@ trap finish_containers EXIT
 start_proxy() {  # $1 = container name, $2 = out dir → sets PROXY_URL
   CUR_PROXY="$1"; CUR_OUT="$2"
   docker rm -f "$1" >/dev/null 2>&1 || true
+  # keys are passed by name (-e VAR), so their values never appear in the docker command line
+  local PENV=() v; for v in AWS_PROFILE ANTHROPIC_API_KEY ANTHROPIC_BASE_URL OPENAI_API_KEY OPENAI_BASE_URL; do
+    [ -n "${!v:-}" ] && { export "${v?}"; PENV+=(-e "$v"); }; done
+  # Harbor: the task's tests (and environment, to discount lines it already holds) go to the PROXY only, for the
+  # verifier_leak check; the harness container never gets them before the verify stage
+  local TMOUNT=(); if [ -n "${TDIR:-}" ] && [ -d "$TDIR/tests" ]; then TMOUNT+=(-v "$TDIR/tests:/hr/tests:ro" -e TESTS_DIR=/hr/tests)
+    [ -d "$TDIR/environment" ] && TMOUNT+=(-v "$TDIR/environment:/hr/env:ro" -e ENV_DIR=/hr/env); fi
   docker run -d --name "$1" --network hr-net -v "$HOME/.aws:/root/.aws:ro" -v "$2:/out" \
-    -e "MODEL=$MODEL" -e "AWS_PROFILE=$AWS_PROFILE" -e "AWS_REGION=$AWS_REGION" -e "AWS_DEFAULT_REGION=$AWS_REGION" -e LOG=/out/calls.jsonl \
-    hr-proxy >/dev/null
+    -e "MODEL=$MODEL" -e "ROUTES=$ROUTES" -e "AWS_REGION=$AWS_REGION" -e "AWS_DEFAULT_REGION=$AWS_REGION" -e LOG=/out/calls.jsonl \
+    -e "EGRESS=$EGRESS" -e "POLICY=$POLICY" -e "BLOCK_URLS=$BLOCK_URLS" -e "CONTROL_TOKEN=$CONTROL_TOKEN" -e "SELF_HOSTS=$1" \
+    ${PENV[@]+"${PENV[@]}"} ${TMOUNT[@]+"${TMOUNT[@]}"} hr-proxy >/dev/null
+  [ "$EGRESS" = open ] || docker network connect hr-int "$1"
   local i; for i in $(seq 1 30); do
     docker exec "$1" python3 -c "import urllib.request;urllib.request.urlopen('http://localhost:4000/health',timeout=2)" 2>/dev/null && break
     sleep 1; [ "$i" = 30 ] && { docker logs "$1"; die "proxy did not come up"; }
   done
   PROXY_URL="http://$1:4000"
+  # what the harness container gets: its network, and the env that sends every client through the egress proxy
+  HNET=hr-net; HENV=()
+  if [ "$EGRESS" != open ]; then
+    HNET=hr-int; local v; for v in HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy; do HENV+=(-e "$v=http://$1:3128"); done
+    HENV+=(-e "NO_PROXY=$1,localhost,127.0.0.1" -e "no_proxy=$1,localhost,127.0.0.1" -e NODE_USE_ENV_PROXY=1)
+    if [ "$EGRESS" = inspect ]; then for v in SSL_CERT_FILE REQUESTS_CA_BUNDLE NODE_EXTRA_CA_CERTS CURL_CA_BUNDLE GIT_SSL_CAINFO; do HENV+=(-e "$v=/out/hr-ca.pem"); done; fi
+  fi
+}
+proxy_phase() {  # $1 = agent | verify
+  [ "$EGRESS" = open ] || docker exec -e "T=$CONTROL_TOKEN" -e "P=$1" "$CUR_PROXY" python3 -c "import os,urllib.request
+urllib.request.urlopen(urllib.request.Request('http://localhost:4000/_hr/phase', data=('{\"phase\":\"'+os.environ['P']+'\"}').encode(), headers={'X-HR-Token': os.environ['T']}), timeout=5)" >/dev/null
 }
 
 # ------------------------------------------------------------------ 6. run
@@ -413,14 +458,15 @@ run_one() {
   mkdir -p "$OUT"; [ -z "$TDIR" ] || mkdir -p "$OUT/verifier"; cp "$RECIPE" "$OUT/recipe.json"; [ "$INSTR" -ef "$OUT/task.txt" ] || cp "$INSTR" "$OUT/task.txt"
   printf '%s\n' "$RUN_CMD" > "$OUT/command.sh"
   # run.json, origin half: written before anything runs, so even a run that dies says where it came from
-  python3 - "$OUT" "$RUN" "$NAME" "$OWNER/$REPO" "$COMMIT" "$TS_NAME" "$TSD" "$TASKNAME" "$MODEL" "$WORKDIR" "$RUN_CMD" "$(recipe_field api_style)" <<'PY'
+  python3 - "$OUT" "$RUN" "$NAME" "$OWNER/$REPO" "$COMMIT" "$TS_NAME" "$TSD" "$TASKNAME" "$MODEL" "$WORKDIR" "$RUN_CMD" "$(recipe_field api_style)" "$ROUTES" "$EGRESS" "$POLICY" "$BLOCK_URLS" <<'PY'
 import json, sys, time
-out, run, name, repo, commit, taskset, tsd, task, model, workdir, cmd, api = sys.argv[1:]
+out, run, name, repo, commit, taskset, tsd, task, model, workdir, cmd, api, routes, egress, pol, blocks = sys.argv[1:]
 rec = {"run": run, "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "finished": None, "kind": "harbor" if taskset else "prompt",
        "harness": {"name": name, "repo": "https://github.com/" + repo, "commit": commit, "api_style": api},
        "task": {"name": task, "taskset": taskset, "taskset_dir": tsd} if taskset else {"name": None, "taskset": None},
        "prompt": None if taskset else open(f"{out}/task.txt").read().strip(),
-       "model": model, "workdir": workdir, "run_command": cmd}
+       "model": model, "routes": routes or None,
+       "interception": {"egress": egress, "policy": pol, "block_urls": [b for b in blocks.split("\n") if b]}, "workdir": workdir, "run_command": cmd}
 json.dump(rec, open(f"{out}/run.json", "w"), indent=2)
 PY
   stage proxy "recording → ${OUT#$HERE/}/calls.jsonl"
@@ -431,9 +477,9 @@ for e in json.load(open(sys.argv[1]))["env"]: print(e["name"]+"="+e["value"].rep
   stage run "$TASKNAME  cwd=$WORKDIR  timeout=${AGENT_T}s  $RUN_CMD"
   CUR_RUN="hr-run-$RUN"; docker rm -f "$CUR_RUN" >/dev/null 2>&1 || true
   local LOGS_MOUNT=(); [ -z "$TDIR" ] || LOGS_MOUNT=(-v "$OUT:/logs")   # Harbor: /logs/agent, /logs/verifier/reward.txt
-  docker run -d --name "$CUR_RUN" --network hr-net -w "$WORKDIR" ${RES_ARGS[@]+"${RES_ARGS[@]}"} \
+  docker run -d --name "$CUR_RUN" --network "$HNET" -w "$WORKDIR" ${RES_ARGS[@]+"${RES_ARGS[@]}"} \
     -v "$OUT:/out" ${LOGS_MOUNT[@]+"${LOGS_MOUNT[@]}"} -v "$INSTR:/task/instruction.md:ro" -v "$WRAPPER:/usr/local/bin/run-harness:ro" \
-    -e "PROXY_URL=$PROXY_URL" -e "HR_PATH=$(image_path "$OTAG")" -e TEST_DIR=/tests ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} "$OTAG" sleep infinity >/dev/null
+    -e "PROXY_URL=$PROXY_URL" -e "HR_PATH=$(image_path "$OTAG")" -e TEST_DIR=/tests ${HENV[@]+"${HENV[@]}"} ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} "$OTAG" sleep infinity >/dev/null
   local START; START=$(date +%s); set +e
   with_timeout "$AGENT_T" docker exec -w "$WORKDIR" "$CUR_RUN" bash -lc "${PRELUDE}run-harness $WORKDIR /task/instruction.md" 2>"$OUT/stderr.log" | tee "$OUT/stdout.log"
   RC=${PIPESTATUS[0]}; set -e
@@ -443,6 +489,7 @@ for e in json.load(open(sys.argv[1]))["env"]: print(e["name"]+"="+e["value"].rep
   if [ -n "$TDIR" ]; then
     # tests enter the container only now, after the agent is done, so the agent can never read them (Harbor does the same)
     stage verify "$TASKNAME  tests/test.sh  timeout=${VERIF_T}s"
+    proxy_phase verify   # the verifier may install its own deps; still logged, never refused
     docker cp "$TDIR/tests/." "$CUR_RUN:/tests/"
     set +e
     with_timeout "$VERIF_T" docker exec -w "$WORKDIR" "$CUR_RUN" bash -lc "${PRELUDE}bash /tests/test.sh" > "$OUT/verifier/stdout.log" 2> "$OUT/verifier/stderr.log"
@@ -453,16 +500,32 @@ for e in json.load(open(sys.argv[1]))["env"]: print(e["name"]+"="+e["value"].rep
   finish_containers
   # run.json, result half: merged into the origin written above
   python3 - "$OUT" "$RC" "$SECS" "$REWARD" "$VRC" <<'PY'
-import json, sys, os, time
+import collections, json, sys, os, time
 out, rc, secs, reward, vrc = sys.argv[1:]
+def interception(out):
+    """egress + policy totals for run.json, from egress.jsonl and the flags/rewrites in calls.jsonl."""
+    eg = [json.loads(l) for l in open(f"{out}/egress.jsonl")] if os.path.exists(f"{out}/egress.jsonl") else []
+    agent = [e for e in eg if e.get("phase") == "agent" and e.get("rule") != "self"]
+    hosts = collections.Counter((e["host"], bool(e.get("allowed"))) for e in agent)
+    flags = collections.Counter(f["rule"] for c in calls for f in c.get("flags") or [])
+    return {"egress": {"connections": len(agent), "blocked": sum(1 for e in agent if not e.get("allowed")),
+                       "tls_failed": sum(1 for e in agent if e.get("kind") == "tls"), "verify_phase": sum(1 for e in eg if e.get("phase") == "verify"),
+                       "hosts": [{"host": h, "allowed": a, "n": n} for (h, a), n in sorted(hosts.items())]},
+            "flags": dict(sorted(flags.items())), "rewrites": sum(len(c.get("rewrites") or []) for c in calls)}
 calls = [json.loads(l) for l in open(f"{out}/calls.jsonl")] if os.path.exists(f"{out}/calls.jsonl") else []
 rec = json.load(open(f"{out}/run.json"))
 rec.update({"finished": time.strftime("%Y-%m-%dT%H:%M:%S"), "rc": int(rc), "seconds": int(secs), "reward": json.loads(reward),
             "verifier_rc": int(vrc) if vrc else None, "calls": len(calls),
             "input_tokens": sum(c["usage"].get("input_tokens") or 0 for c in calls), "output_tokens": sum(c["usage"].get("output_tokens") or 0 for c in calls),
-            "errors": sum(1 for c in calls if c.get("error")), "files": sorted(os.listdir(out))})
+            "errors": sum(1 for c in calls if c.get("error")),
+            **interception(out),
+            "models": [{"requested": r, "served": s, "calls": n} for (r, s), n in
+                       sorted(collections.Counter((c.get("model_requested"), c.get("model")) for c in calls).items(), key=str)],
+            "files": sorted(os.listdir(out))})
 json.dump(rec, open(f"{out}/run.json", "w"), indent=2)
 print(f"rc={rc}  {secs}s  model calls={len(calls)} (in={rec['input_tokens']} out={rec['output_tokens']} tokens, {rec['errors']} errors)" + (f"  reward={reward}" if rec["kind"] == "harbor" else ""))
+e = rec["egress"]; print(f"egress: {e['connections']} connections, {e['blocked']} blocked" + (f", {e['tls_failed']} refused interception" if e["tls_failed"] else "")
+      + (f"   flags: {rec['flags']}" if rec["flags"] else "") + (f"   rewrites: {rec['rewrites']}" if rec["rewrites"] else ""))
 if not calls: print("WARNING: no model calls reached the proxy (check stderr.log and the env in recipe.json)", file=sys.stderr)
 PY
 }

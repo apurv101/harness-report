@@ -51,9 +51,25 @@ and flip rate exist. Each task x k is its own run folder, and the invocation end
 ## The proxy
 
 `proxy.py` speaks the OpenAI chat-completions API and the Anthropic messages API on the harness side (tool
-calling and streaming on both) and Bedrock on the model side. Whatever model name the harness sends is
-recorded and replaced with `MODEL` from `.env`. Each call becomes one JSON line: request, response, tokens,
-latency, the model requested, the model used, and any error.
+calling and streaming on both). Each call is routed by the model name the harness sends:
+
+```sh
+# .env or --routes: pattern=target, first match wins; MODEL serves everything else
+ROUTES='claude-haiku*=anthropic,gpt-4o-mini=openai/gpt-4.1-mini'
+```
+
+| target | goes to | model |
+|---|---|---|
+| `bedrock/<id>` (or a bare id) | Bedrock through `~/.aws` | `<id>` |
+| `anthropic` / `anthropic/<id>` | api.anthropic.com with `ANTHROPIC_API_KEY` | as requested / `<id>` |
+| `openai` / `openai/<id>` | `OPENAI_BASE_URL` (default api.openai.com) with `OPENAI_API_KEY` | as requested / `<id>` |
+
+So a harness can keep its own models on the real provider with our key, swap some of them, or send everything to
+one Bedrock model (the default: no ROUTES, `MODEL=bedrock/...`). The key the harness holds is a dummy; the proxy
+drops it and uses its own. `anthropic` and `openai` targets only take requests in their own API shape; Bedrock takes
+both. Upstream is always asked for a finished response and the stream the harness wants is synthesized from it.
+Each call becomes one JSON line: request, response, tokens, latency, the model requested, the backend and model
+that served it, and any error. `run.json` sums the calls per requested/served pair under `models`.
 
 ## A run folder
 
@@ -83,26 +99,28 @@ mini-swe-agent at 04d809c on Bedrock Sonnet 4.5, FizzBuzz: analyze 7 turns, $1.5
 ~70 s; task 21 s, 6 calls through the proxy, 0 errors, harness exit 0. The AI chose litellm's `openai/`
 route with `OPENAI_BASE_URL` pointed at the proxy and the model name `gpt-4o`, which the proxy swapped.
 
-## Run viewer
+## Frontend
 
-`ui/` is a separate, read-only web UI for the `runs/` folder: one Python server (no dependencies) and one page.
+`site/` is the single frontend: landing page, GitHub onboarding preview, and real recorded evaluations,
+with one shared navigation and design. `serve.py` serves it together with the read-only `runs/` API.
+There is no separate `ui/` app and no build step or Python dependencies.
 
 ```sh
-python3 ui/serve.py                         # http://localhost:8788   (--port, --runs to change)
+python3 serve.py                            # http://localhost:8789
+python3 serve.py --port 9000 --runs /path/to/runs
 ```
 
-`/` lists every run. `/<name>/<run-id>` (or just `/<run-id>`) shows one run: the header facts from `run.json`,
-the task, and tabs for the trajectory (the conversation from any recorded call, last by default, with tool calls
-and observations), the calls table (click a row for the raw request and response), the recipe (summary, run and
-check commands, env, Dockerfile, notes), the verifier (Harbor: reward, the task's test counts parsed from pytest's
-`-v` output with the failed test names, and the test.sh logs; tests from files the agent wrote itself are shown
-separately as `+N own`), the logs (`stdout.log`, `stderr.log`, `proxy.log`), and every file in the
-run folder with a raw link. `/api/run/<name>/<run-id>` returns the same data as JSON.
+`/` opens the minimal “Evaluate your harness” landing page. `/#connect` starts the GitHub flow;
+`/#runs` lists and searches actual local runs. `/#runs/<run-id>` opens a run's trajectory, calls,
+verifier, recipe, logs, and files. The selected tab survives refresh. Old `/<run-id>` links open
+the same frontend. `/api/runs`, `/api/run/<run-id>`, and `/raw/<run-id>/<file>` provide the underlying data.
 
-## Site
+GitHub sign-in and the onboarding task remain explicitly simulated. Recorded evaluations use the real
+contents of `runs/`. A plain static host can display the frontend, but needs the run API to load evaluations.
 
-`site/` is harnessreport.com: one self-contained `index.html` (inline CSS, no build, same skeleton as the
-ninesweep.com page), `favicon.svg`, `robots.txt`, `sitemap.xml`, `llms.txt`. It is a Cloudflare Pages project
+## Hosting
+
+`site/` also contains `favicon.svg`, `robots.txt`, `sitemap.xml`, and `llms.txt`. It is a Cloudflare Pages project
 named `harness-report` (Pages URL `harness-report-927.pages.dev`; custom domains `harnessreport.com` and
 `www.harnessreport.com`). DNS for the domain is the Route 53 zone in the `operator` AWS profile. Edit the
 files and redeploy:

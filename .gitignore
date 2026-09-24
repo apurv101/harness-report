@@ -4,3 +4,4 @@ runs/
 __pycache__/
 .wrangler/
 .DS_Store
+.playwright-mcp/

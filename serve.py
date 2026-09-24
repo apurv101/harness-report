@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""serve.py — a read-only web UI for the runs/ folder.  No dependencies beyond python3.
+"""serve.py — the Harness Report site and read-only run API.  No dependencies beyond python3.
 
-    python3 ui/serve.py                 # serves ../runs on http://localhost:8788
-    python3 ui/serve.py --port 9000 --runs /path/to/runs
+    python3 serve.py                 # serves site/ and runs/ on http://localhost:8789
+    python3 serve.py --port 9000 --runs /path/to/runs
 
 URLs
-    /                              list of every run
-    /<run-id>                      one run, everything in its folder (runs/<run-id>/)
+    /                              product landing
+    /#runs                        recorded evaluations
+    /#runs/<run-id>                run detail
+    /<run-id>                      legacy run link (opens the same frontend)
     /api/runs                      JSON list of runs (summary of each run.json)
     /api/run/<run-id>              JSON bundle: run.json, task, command, recipe, calls[], logs, files[]
     /raw/<run-id>/<file>           a file from the run folder as-is
@@ -19,8 +21,9 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PAGE = os.path.join(HERE, "index.html")
-RUNS = os.path.abspath(os.path.join(HERE, "..", "runs"))
+SITE = os.path.join(HERE, "site")
+PAGE = os.path.join(SITE, "index.html")
+RUNS = os.path.abspath(os.path.join(HERE, "runs"))
 
 TEXT_FILES = ("task.txt", "command.sh", "stdout.log", "stderr.log", "proxy.log")   # inlined into the bundle
 CORE = TEXT_FILES + ("run.json", "recipe.json", "calls.jsonl")                     # everything else is "other"
@@ -183,13 +186,18 @@ class H(SimpleHTTPRequestHandler):
             if not d or not p.startswith(os.path.realpath(d) + os.sep) or not os.path.isfile(p): return self.send(404, "not found", "text/plain")
             ctype = "application/json" if p.endswith(".json") else "text/plain; charset=utf-8"
             return self.send(200, open(p, "rb").read(), ctype)
-        # anything else is the single page; it reads the path itself
+        static_types = {"favicon.svg": "image/svg+xml", "robots.txt": "text/plain; charset=utf-8",
+                        "sitemap.xml": "application/xml", "llms.txt": "text/plain; charset=utf-8"}
+        if len(parts) == 1 and parts[0] in static_types:
+            asset = read(os.path.join(SITE, parts[0]))
+            return self.send(200, asset, static_types[parts[0]]) if asset is not None else self.send(404, "not found", "text/plain")
+        # All frontend routes share site/index.html.
         page = read(PAGE)
         return self.send(200, page, "text/html; charset=utf-8") if page else self.send(500, "index.html missing", "text/plain")
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(); ap.add_argument("--port", type=int, default=8788); ap.add_argument("--runs", default=RUNS)
+    ap = argparse.ArgumentParser(); ap.add_argument("--port", type=int, default=8789); ap.add_argument("--runs", default=RUNS)
     a = ap.parse_args(); RUNS = os.path.abspath(a.runs)
-    print(f"runs UI on http://localhost:{a.port}   runs={RUNS}", flush=True)
+    print(f"Harness Report on http://localhost:{a.port}   runs={RUNS}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", a.port), H).serve_forever()
