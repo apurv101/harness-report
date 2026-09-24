@@ -23,7 +23,8 @@ Policy:        policy.py reads each reply's tool calls and shell fences before t
                (default; findings in the record), enforce (flagged actions rewritten to fail), off. With $TESTS_DIR
                the requests are also checked for the task's test lines (verifier_leak).
 Record:        one JSON line per call in $LOG: n, ts, route, latency_ms, model_requested, request, response,
-               usage, stream, error, backend, model (the model that served it), flags, and on
+               usage, stream, error, backend, model (the model that served it), flags, request_fixes (what the proxy
+               changed so Bedrock would accept the call: max_tokens capped, refused fields dropped, ...), and on
                enforce rewrites + response_original. `stream: true` requests are answered with a synthesized event stream.
 """
 import datetime, fnmatch, http.client, json, os, re, select, socket, ssl, sys, time, uuid, threading, traceback, urllib.error, urllib.request
@@ -72,6 +73,27 @@ def record(rec):
           + (f"  ERROR {rec['error'][:120]}" if rec.get("error") else ""), flush=True)
 
 
+# Bedrock refuses requests some harnesses send as a matter of course. These fixes make the smallest change that gets the
+# call through, and each one is written to the call's record under request_fixes, so the recording shows what was changed.
+MAX_OUT = [("haiku-4-5", 64000), ("sonnet-4", 64000), ("opus-4-5", 64000), ("opus-4", 32000), ("3-7-sonnet", 64000), ("3-5-haiku", 8192)]
+BEDROCK_ANTHROPIC_KEYS = {"anthropic_version", "messages", "system", "max_tokens", "temperature", "top_p", "top_k", "stop_sequences",
+                          "tools", "tool_choice", "thinking"}
+
+
+def max_out(model):
+    if os.environ.get("MAX_OUTPUT_TOKENS"): return int(os.environ["MAX_OUTPUT_TOKENS"])
+    return next((n for pat, n in MAX_OUT if pat in (model or "")), None)
+
+
+def fix_sampling(p, fixes, temp="temperature", top_p="top_p", thinking_on=False):
+    """Anthropic's newer models take temperature or top_p, not both; with thinking on, neither may be changed."""
+    if thinking_on:
+        for k in (temp, top_p, "top_k"):
+            if k in p: fixes.append(f"dropped {k}={p.pop(k)} (thinking is on)")
+    elif p.get(temp) is not None and p.get(top_p) is not None:
+        fixes.append(f"dropped {top_p}={p.pop(top_p)} (temperature is set)")
+
+
 def with_retry(fn):
     for attempt in range(4):
         try:
@@ -103,7 +125,7 @@ def _push(msgs, role, blocks):
     else: msgs.append({"role": role, "content": blocks})
 
 
-def openai_to_converse(body, model):
+def openai_to_converse(body, model, fixes):
     system, msgs = [], []
     for m in body.get("messages", []):
         role, c = m.get("role"), m.get("content")
@@ -128,20 +150,33 @@ def openai_to_converse(body, model):
     kw = {"modelId": model, "messages": msgs}
     if system: kw["system"] = system
     inf = {"maxTokens": int(body.get("max_completion_tokens") or body.get("max_tokens") or 4096)}
+    cap = max_out(model)
+    if cap and inf["maxTokens"] > cap: fixes.append(f"max_tokens {inf['maxTokens']} -> {cap}"); inf["maxTokens"] = cap
     if body.get("temperature") is not None: inf["temperature"] = float(body["temperature"])
     if body.get("top_p") is not None: inf["topP"] = float(body["top_p"])
+    fix_sampling(inf, fixes, "temperature", "topP")
     stop = body.get("stop")
     if stop: inf["stopSequences"] = [stop] if isinstance(stop, str) else list(stop)[:4]
     kw["inferenceConfig"] = inf
     tools = [t for t in body.get("tools") or [] if t.get("type", "function") == "function"]
     choice = body.get("tool_choice")
+    specs = []
     if tools and choice != "none":
-        specs = []
         for t in tools:
             f = t.get("function", t)
             schema = f.get("parameters") or {"type": "object", "properties": {}}
             if schema.get("type") != "object": schema = {"type": "object", "properties": {}}
             specs.append({"toolSpec": {"name": f["name"], "description": (f.get("description") or f["name"])[:2000], "inputSchema": {"json": schema}}})
+    if not specs:
+        # Converse refuses toolUse/toolResult blocks without a toolConfig, even when this turn offers no tools (nib does
+        # this); declare the tools the history already used, and drop tool_choice so the model is not pushed to call one
+        used = sorted({b["toolUse"]["name"] for m in msgs for b in m["content"] if "toolUse" in b})
+        if not used and any("toolResult" in b for m in msgs for b in m["content"]): used = ["tool"]
+        if used:
+            fixes.append(f"toolConfig declared from history: {used}")
+            specs = [{"toolSpec": {"name": n, "description": n, "inputSchema": {"json": {"type": "object", "properties": {}}}}} for n in used]
+            choice = None
+    if specs:
         tc = {"tools": specs}
         if choice == "required": tc["toolChoice"] = {"any": {}}
         elif isinstance(choice, dict) and choice.get("function", {}).get("name"): tc["toolChoice"] = {"tool": {"name": choice["function"]["name"]}}
@@ -181,10 +216,24 @@ def openai_stream(full, body):
 
 
 # ----------------------------------------------------------------------------- Anthropic  →  Bedrock InvokeModel
-def anthropic_call(body, model):
-    b = {k: v for k, v in body.items() if k not in ("model", "stream", "metadata", "service_tier", "betas")}
+def anthropic_call(body, model, fixes):
+    # keep only the fields Bedrock's Messages API accepts (Claude Code sends context_management, newer SDKs output_config, ...)
+    b = {k: v for k, v in body.items() if k in BEDROCK_ANTHROPIC_KEYS}
+    dropped = sorted(k for k in body if k not in b and k not in ("model", "stream", "metadata", "service_tier", "betas"))
+    if dropped: fixes.append(f"dropped fields Bedrock refuses: {dropped}")
     b["anthropic_version"] = "bedrock-2023-05-31"
     b.setdefault("max_tokens", 4096)
+    cap = max_out(model)
+    if cap and b["max_tokens"] > cap: fixes.append(f"max_tokens {b['max_tokens']} -> {cap}"); b["max_tokens"] = cap
+    th = b.get("thinking")
+    if isinstance(th, dict):
+        if th.get("type") == "enabled":
+            budget = min(int(th.get("budget_tokens") or 1024), b["max_tokens"] - 1)
+            if budget < 1024: b.pop("thinking"); fixes.append("dropped thinking (max_tokens too small for a budget)")
+            else: b["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        elif th.get("type") == "disabled": b["thinking"] = {"type": "disabled"}
+        else: b.pop("thinking"); fixes.append(f"dropped thinking type {th.get('type')!r} (not on this model via Bedrock)")
+    fix_sampling(b, fixes, thinking_on=(b.get("thinking") or {}).get("type") == "enabled")
     r = with_retry(lambda: brt.invoke_model(modelId=model, body=json.dumps(b), contentType="application/json", accept="application/json"))
     resp = json.loads(r["body"].read())
     resp["model"] = body.get("model") or model
@@ -513,15 +562,16 @@ class Handler(BaseHTTPRequestHandler):
         rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "route": route, "path": p, "model_requested": body.get("model"), "model": served,
                "backend": backend, "stream": stream, "request": body, "response": None, "usage": {}, "error": None}
         t0 = time.time()
+        fixes = []
         try:
             if backend != "bedrock" and backend != route:
                 raise Upstream(400, f"model '{body.get('model')}' routes to {backend}, but the harness speaks the {route} API; route it to bedrock/<id> or {route}[/<id>]")
             if route == "openai":
                 if backend == "openai": full = openai_direct(body, target)
-                else: full = converse_to_openai(with_retry(lambda: brt.converse(**openai_to_converse(body, served))), body)
+                else: full = converse_to_openai(with_retry(lambda: brt.converse(**openai_to_converse(body, served, fixes))), body)
                 u = full.get("usage") or {}; rec["usage"] = {"input_tokens": u.get("prompt_tokens"), "output_tokens": u.get("completion_tokens")}
             else:
-                full = anthropic_direct(body, target, self.headers) if backend == "anthropic" else anthropic_call(body, served)
+                full = anthropic_direct(body, target, self.headers) if backend == "anthropic" else anthropic_call(body, served, fixes)
                 u = full.get("usage", {}); rec["usage"] = {"input_tokens": u.get("input_tokens"), "output_tokens": u.get("output_tokens")}
             if backend != "bedrock" and full.get("model"): rec["model"] = full["model"]
             if POLICY != "off":
@@ -532,11 +582,13 @@ class Handler(BaseHTTPRequestHandler):
                     if rewrites: rec["response_original"], rec["rewrites"], full = full, rewrites, new
             rec["response"] = full
             rec["latency_ms"] = int((time.time() - t0) * 1000)
+            if fixes: rec["request_fixes"] = fixes
             record(rec)
             if stream: self._send_stream(openai_stream(full, body) if route == "openai" else anthropic_stream(full))
             else: self._send(200, full)
         except Exception as e:
             rec["error"] = f"{type(e).__name__}: {e}"; rec["latency_ms"] = int((time.time() - t0) * 1000)
+            if fixes: rec["request_fixes"] = fixes
             record(rec)
             traceback.print_exc()
             code = e.code if isinstance(e, Upstream) else 400 if isinstance(e, ClientError) and "ValidationException" in str(e) else 500
