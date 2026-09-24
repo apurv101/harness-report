@@ -10,6 +10,8 @@ export interface PreviewState {
   connected?: boolean
   repo?: string
   result?: 'example-passed' | null
+  /** the real evaluation the first-task step started (served by serve.py), whatever its outcome */
+  evalId?: string | null
 }
 
 export function readPreview(): PreviewState {
@@ -18,6 +20,7 @@ export function readPreview(): PreviewState {
   if (typeof state !== 'object' || state === null || Array.isArray(state)) return {}
   const clean = { ...state } as PreviewState
   if (typeof clean.repo !== 'string' || !REPO_NAME.test(clean.repo)) delete clean.repo
+  if (typeof clean.evalId !== 'string' || !/^\d{8}T\d{6}-[a-z0-9.-]{1,12}$/.test(clean.evalId)) delete clean.evalId
   return clean
 }
 

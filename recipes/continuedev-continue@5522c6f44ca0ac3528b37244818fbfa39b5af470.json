@@ -1,0 +1,56 @@
+{
+  "summary": "The harness is the Continue CLI (`cn`, package `@continuedev/cli` in `extensions/cli`), a Node/TypeScript coding agent. Its entrypoint is `dist/cn.js` (esbuild bundle of `src/index.ts`, built by `npm run build` after the local `packages/*` and `core` dependencies are installed/built exactly as `.github/workflows/cli-pr-checks.yml` does). Non-interactive runs use headless mode `cn -p \"<prompt>\"`; `--auto` allows all tools (in headless mode Edit/Write default to \"ask\" and are otherwise excluded), and `--config <file.yaml>` supplies a local assistant YAML so no Continue Hub login or api.continue.dev access is needed. Model calls go through `@continuedev/openai-adapters` `constructLlmApi`: `provider: anthropic` uses `apiBase` (default https://api.anthropic.com/v1/) and POSTs to `<apiBase>messages` with `x-api-key`, converting OpenAI-style tool definitions to Anthropic tool_use; `provider: openai` would instead drive the OpenAI SDK with `baseURL: apiBase` (chat/completions). The run command writes a config YAML pointing `apiBase` at the proxy and runs one task; sessions and logs land under `$CONTINUE_GLOBAL_DIR` (set to /out/continue) in `sessions/` and `logs/cn.log`.",
+  "base_image": "debian:bookworm-slim",
+  "dockerfile": "ARG BASE=debian:bookworm-slim\nFROM ${BASE}\n\nARG NODE_VERSION=20.20.1\nENV NPM_CONFIG_UPDATE_NOTIFIER=false \\\n    NPM_CONFIG_FUND=false \\\n    NPM_CONFIG_AUDIT=false\n\n# Only what the build needs; never touch the base image's python/node.\nRUN set -eux; \\\n    export DEBIAN_FRONTEND=noninteractive; \\\n    apt-get update; \\\n    apt-get install -y --no-install-recommends ca-certificates curl git xz-utils build-essential; \\\n    command -v python3 >/dev/null 2>&1 || apt-get install -y --no-install-recommends python3; \\\n    rm -rf /var/lib/apt/lists/*\n\n# Self-contained Node runtime under /opt/harness/node (version from .nvmrc).\nRUN set -eux; \\\n    case \"$(uname -m)\" in x86_64) a=x64 ;; aarch64|arm64) a=arm64 ;; *) echo \"unsupported arch\"; exit 1 ;; esac; \\\n    mkdir -p /opt/harness/node /opt/harness/bin; \\\n    curl -fsSL \"https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${a}.tar.xz\" \\\n      | tar -xJ -C /opt/harness/node --strip-components=1; \\\n    /opt/harness/node/bin/node --version\n\nENV PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH\n\n# Harness source (build context = repo root).\nCOPY . /opt/harness/src\n\n# Mirror .github/workflows/cli-pr-checks.yml: root deps, local packages, core, then the CLI bundle.\nRUN set -eux; cd /opt/harness/src && npm ci --ignore-scripts\nRUN set -eux; cd /opt/harness/src && CI=true node ./scripts/build-packages.js\nRUN set -eux; cd /opt/harness/src/core && npm ci && npm run build\nRUN set -eux; cd /opt/harness/src/extensions/cli && npm ci --include=optional && npm run build \\\n    && test -f dist/cn.js && test -f dist/index.js\n\n# `cn` launcher on PATH; runs the harness's own CLI entrypoint.\nRUN printf '#!/bin/sh\\nexec /opt/harness/node/bin/node /opt/harness/src/extensions/cli/dist/cn.js \"$@\"\\n' > /opt/harness/bin/cn \\\n    && chmod +x /opt/harness/bin/cn\n",
+  "run_command": "set -uo pipefail; mkdir -p /out/continue; cat > /out/continue/cn-config.yaml <<EOF\nname: Sandbox Agent\nversion: 1.0.0\nschema: v1\nmodels:\n  - name: proxy-model\n    model: ${CONTINUE_MODEL:-claude-sonnet-4-5-20250929}\n    provider: anthropic\n    apiKey: ${ANTHROPIC_API_KEY:-proxy}\n    apiBase: ${CONTINUE_PROXY_BASE}\n    roles:\n      - chat\n    capabilities:\n      - tool_use\nEOF\ncn -p --auto --verbose --config /out/continue/cn-config.yaml -- \"$TASK\" 2>&1 | tee /out/cn-output.log; rc=${PIPESTATUS[0]}; cp -r /out/continue/sessions /out/sessions 2>/dev/null || true; exit $rc",
+  "check_command": "cn --version && cn --help | grep -q -- '--print'",
+  "env": [
+    {
+      "name": "CONTINUE_PROXY_BASE",
+      "value": "$PROXY_URL/v1/"
+    },
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "CONTINUE_MODEL",
+      "value": "claude-sonnet-4-5-20250929"
+    },
+    {
+      "name": "CONTINUE_GLOBAL_DIR",
+      "value": "/out/continue"
+    },
+    {
+      "name": "CONTINUE_CLI_ENABLE_TELEMETRY",
+      "value": "0"
+    },
+    {
+      "name": "CONTINUE_METRICS_ENABLED",
+      "value": "0"
+    },
+    {
+      "name": "CONTINUE_CLI_DISABLE_COMMIT_SIGNATURE",
+      "value": "1"
+    },
+    {
+      "name": "FORCE_NO_TTY",
+      "value": "true"
+    },
+    {
+      "name": "NO_COLOR",
+      "value": "1"
+    },
+    {
+      "name": "NPM_CONFIG_UPDATE_NOTIFIER",
+      "value": "false"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Key facts from the source: (1) `cn` has no env var for model selection; the model, provider, apiBase and apiKey come from the assistant YAML passed via `--config` (see extensions/cli/src/config.ts createLlmApi -> @continuedev/openai-adapters constructLlmApi), so the run command generates that YAML from CONTINUE_PROXY_BASE/CONTINUE_MODEL. (2) AnthropicApi (packages/openai-adapters/src/apis/Anthropic.ts) posts to new URL(\"messages\", apiBase) with headers x-api-key, anthropic-version 2023-06-01 and anthropic-beta prompt-caching; hence apiBase=$PROXY_URL/v1/. To use the OpenAI side instead, set provider: openai with apiBase: $PROXY_URL/v1 (OpenAI SDK baseURL) and any model name, and api_style=openai. (3) Headless mode (`-p`) excludes \"ask\" tools (Edit/Write/MultiEdit) unless `--auto`, which applies AUTO_MODE_POLICIES (allow *). (4) `--config <file>` skips onboarding entirely (onboarding.ts runOnboardingFlow returns early); with no --config and ANTHROPIC_API_KEY set the CLI would auto-write ~/.continue/config.yaml pointing at api.anthropic.com, so always pass --config. (5) Telemetry only activates when OTEL_* exporters are configured and CONTINUE_CLI_ENABLE_TELEMETRY!=0 / CONTINUE_METRICS_ENABLED!=0; both are disabled. version.ts fires one fire-and-forget fetch to api.continue.dev/cn/info at import time; it fails silently without network and does not block exit. (6) CONTINUE_GLOBAL_DIR=/out/continue makes sessions (sessions/*.json chat history incl. tool calls) and logs (logs/cn.log, debug level with --verbose) land under /out; stdout is also tee'd to /out/cn-output.log. (7) FORCE_NO_TTY=true stops readStdinSync from touching stdin; a prompt passed after `--` is the positional [prompt]. (8) Build follows CI: root npm ci (scripts skipped so husky doesn't run), scripts/build-packages.js (CI=true -> npm ci; builds config-types, terminal-security, fetch, config-yaml, llm-info, openai-adapters, continue-sdk), core npm ci + tsc build (core has native deps sqlite3/onnxruntime-node/vectordb that fetch prebuilt binaries at install; build-essential is installed as fallback), then extensions/cli npm ci --include=optional (its `prepare` already runs the esbuild build) + npm run build. The bundle (dist/index.js + dist/cn.js + dist/xhr-sync-worker.js) needs only node at runtime. Node 20.20.1 comes from .nvmrc; override with --build-arg NODE_VERSION if that tarball is unavailable. The build downloads npm packages and the node tarball, so it needs network at build time only."
+}

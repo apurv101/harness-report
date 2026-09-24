@@ -1,0 +1,64 @@
+{
+  "summary": "Docent is a LangGraph state machine (intake -> research <-> tools -> finalize_research -> draft) that triages one GitHub issue and writes a maintainer-style reply; it is not a coding agent and never reads or edits files in the working directory. It has no CLI: the entrypoint is the Python coroutine agent.run.run_agent(github_number) (also wrapped by FastAPI as POST /agent/run), which loads the issue row from a SQLAlchemy table and drives the graph. Model calls go through langchain-anthropic ChatAnthropic (research, finalize via with_structured_output = forced tool_choice, draft; model from RESEARCH_MODEL) and the raw anthropic SDK (hard-coded claude-haiku-4-5 for intake summaries); both honor ANTHROPIC_BASE_URL/ANTHROPIC_API_KEY. Tools (Voyage embeddings + pgvector corpus search, remote GitHub MCP server) cannot go through the proxy, so the packaged run seeds a SQLite row from $TASK and sets RESEARCH_MAX_ITERATIONS=0, yielding exactly three Anthropic messages calls per task.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\n\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update \\\n && apt-get install -y --no-install-recommends ca-certificates curl git \\\n && rm -rf /var/lib/apt/lists/*\n\n# Self-contained uv + uv-managed CPython 3.11 under /opt/harness; the base image's python is never used or shadowed.\nCOPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /opt/harness/bin/\nENV UV_PYTHON_INSTALL_DIR=/opt/harness/python \\\n    UV_PROJECT_ENVIRONMENT=/opt/harness/venv \\\n    UV_CACHE_DIR=/opt/harness/uv-cache \\\n    UV_PYTHON_PREFERENCE=only-managed \\\n    UV_LINK_MODE=copy\nRUN /opt/harness/bin/uv python install 3.11\n\n# Harness source + locked dependencies. The project declares no build system (virtual package), so its\n# top-level modules (agent/, core/, ai/, ...) are exposed to the venv via a .pth entry instead of PYTHONPATH.\nCOPY . /opt/harness/src\nRUN /opt/harness/bin/uv sync --frozen --no-dev --no-install-project --python 3.11 --project /opt/harness/src \\\n && echo /opt/harness/src > /opt/harness/venv/lib/python3.11/site-packages/docent_src.pth \\\n && rm -rf /opt/harness/uv-cache\n\n# Only uv goes on PATH; the harness interpreter is addressed as /opt/harness/venv/bin/python.\nENV PATH=/opt/harness/bin:$PATH\n",
+  "run_command": "set -euo pipefail\nexport OUT=/out\nmkdir -p \"$OUT\"\n/opt/harness/venv/bin/python -P - <<'PY'\nimport os, pathlib, sqlite3, uuid\ndb = os.environ[\"DATABASE_URL\"].removeprefix(\"sqlite:///\")\npathlib.Path(db).parent.mkdir(parents=True, exist_ok=True)\npathlib.Path(db).unlink(missing_ok=True)\ntask = os.environ.get(\"TASK\", \"\").strip() or \"(empty task)\"\ntitle = task.splitlines()[0][:200]\nurl = \"https://github.com/%s/%s/issues/1\" % (os.environ[\"REPO_OWNER\"], os.environ[\"REPO_NAME\"])\ncon = sqlite3.connect(db)\ncon.execute('CREATE TABLE \"open-issues\" (id CHAR(32) PRIMARY KEY, github_number INTEGER UNIQUE, title TEXT, original_question TEXT, body_summary TEXT, url TEXT, created_at TIMESTAMP, tags TEXT, embeddings TEXT)')\ncon.execute('INSERT INTO \"open-issues\" VALUES (?,?,?,?,?,?,?,?,?)', (uuid.uuid4().hex, 1, title, task, task, url, None, \"{}\", \"[\" + \",\".join([\"0\"] * 1024) + \"]\"))\ncon.commit()\ncon.close()\nPY\n/opt/harness/venv/bin/python -P - <<'PY'\nimport asyncio, json, os\nfrom agent.run import run_agent\nfinal = asyncio.run(run_agent(1))\nout = os.environ[\"OUT\"]\nwith open(os.path.join(out, \"docent_result.json\"), \"w\") as f:\n    json.dump({\"draft\": final[\"draft\"], \"research_brief\": final[\"research_brief\"], \"needs_escalation\": final[\"needs_escalation\"], \"tool_calls\": final[\"tool_calls\"]}, f, indent=2)\nwith open(os.path.join(out, \"docent_messages.json\"), \"w\") as f:\n    json.dump([m.model_dump() for m in final[\"messages\"]], f, indent=2, default=str)\nprint(final[\"draft\"])\nPY",
+  "check_command": "export ANTHROPIC_API_KEY=\"${ANTHROPIC_API_KEY:-proxy}\" OPENAI_API_KEY=\"${OPENAI_API_KEY:-proxy}\" VOYAGEAI_API_KEY=\"${VOYAGEAI_API_KEY:-proxy}\" GITHUB_PAT_KEY=\"${GITHUB_PAT_KEY:-proxy}\" REPO_OWNER=\"${REPO_OWNER:-pydantic}\" REPO_NAME=\"${REPO_NAME:-pydantic}\" DATABASE_URL=\"${DATABASE_URL:-sqlite:////tmp/docent/docent.db}\" && /opt/harness/venv/bin/python -P -c \"import sys, anthropic, langchain_anthropic, langgraph, sqlalchemy, pgvector; from agent.graph import graph; print(sys.executable, sys.version.split()[0]); print('nodes:', sorted(graph.get_graph().nodes))\"",
+  "env": [
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "VOYAGEAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "GITHUB_PAT_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "REPO_OWNER",
+      "value": "pydantic"
+    },
+    {
+      "name": "REPO_NAME",
+      "value": "pydantic"
+    },
+    {
+      "name": "DATABASE_URL",
+      "value": "sqlite:////tmp/docent/docent.db"
+    },
+    {
+      "name": "RESEARCH_MODEL",
+      "value": "claude-sonnet-4-6"
+    },
+    {
+      "name": "RESEARCH_MAX_ITERATIONS",
+      "value": "0"
+    },
+    {
+      "name": "LANGSMITH_TRACING",
+      "value": "false"
+    },
+    {
+      "name": "LANGCHAIN_TRACING_V2",
+      "value": "false"
+    },
+    {
+      "name": "PYTHONUNBUFFERED",
+      "value": "1"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "VERIFIED: overlay built on python:3.12-slim-bookworm and buildpack-deps:jammy; check_command passes on both; run_command executed inside both containers against a mock Anthropic server on the host and produced /out/docent_result.json + /out/docent_messages.json with exactly 3 POST /v1/messages calls (research: no tools; finalize_research: tools=[ResearchBrief] with tool_choice={type:tool}; draft: no tools), non-streaming, x-api-key=proxy. Base image python3 is untouched (bookworm: /usr/local/bin/python3 3.12; jammy: /usr/bin/python3 3.10), PYTHONPATH stays unset; the harness modules reach the venv via a .pth file.\n\nCAVEATS (important for interpreting recordings):\n1. Docent is an issue-triage agent, not a coding agent. It has no CLI and never reads or edits files in cwd; the deliverable is a markdown reply + structured ResearchBrief for the issue described by $TASK. The run command treats $TASK as the issue text (first line = title) and invokes the harness's real entrypoint agent.run.run_agent (the same coroutine POST /agent/run calls).\n2. The harness normally needs Postgres+pgvector, Voyage AI (embeddings/rerank) and a remote GitHub MCP server with a PAT. None of those can be routed through the proxy, so: DATABASE_URL points at a SQLite file (only a single-row SELECT happens, which SQLAlchemy/pgvector types tolerate; the table is created with raw DDL because create_all would fail on the Postgres ARRAY column); RESEARCH_MAX_ITERATIONS=0 makes the research node bind no tools, so search_corpus and the GitHub MCP client are never constructed (this is the harness's own documented iteration-cap behavior, not a code change); body_summary and a zero embedding are pre-seeded so intake skips the Haiku summary call, because that call is immediately followed by a Voyage embed that would fail offline. Consequence: the research prompt still describes tools, but the model receives none, and the tool-loop/RAG path is not exercised.\n3. Model name: RESEARCH_MODEL=claude-sonnet-4-6 (the repo default) is sent for all three calls; the proxy substitutes the real model. The hard-coded claude-haiku-4-5 in ai/summary_llm.py is never hit in this configuration.\n4. Structured output uses langchain-anthropic's default method \"function_calling\" (forced tool_choice, no beta headers), which the proxy's Anthropic endpoint supports. Calls are non-streaming.\n5. OPENAI_API_KEY / VOYAGEAI_API_KEY / GITHUB_PAT_KEY must merely be present for pydantic-settings validation; they are never used for network calls. REPO_OWNER/REPO_NAME only template the prompts.\n6. The run command rebuilds the SQLite DB each time (fresh row with github_number=1) and writes the draft to stdout plus JSON artifacts under /out. uv itself (/opt/harness/bin/uv) is on PATH but unused at run time.\n7. Local test harness kept at work/emanuelecz-docent/test/ (mock_anthropic.py, run_cmd.sh, Dockerfile.overlay, test.sh, test-docker.sh, logs). The clone itself was left unmodified."
+}

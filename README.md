@@ -122,6 +122,16 @@ verifier, recipe, logs, and files. The selected tab is a `?tab=` query, so it su
 Older `#runs/<id>` hashes and `/<run-id>` paths are rewritten to the current form on load.
 `/api/runs`, `/api/run/<run-id>`, and `/raw/<run-id>/<file>` provide the underlying data.
 
+**Runs from the site.** Served by `serve.py`, step 3's "Run task" is real: `evals.py` starts `run.sh` on the
+chosen repository and the `aider_polyglot` bowling task, **one at a time** on this machine (a second start gets a
+409 naming the running one). With `HR_EVENTS` set, `run.sh` appends one JSON line per stage, recipe decision, run
+folder, result and error; the page polls `GET /api/evals/<id>?after=<n>` every 1.5 s for those events plus the live
+model-call count read from the run's `calls.jsonl`, then shows the real result. A private repository is cloned with a
+short-lived GitHub App installation token that reaches git only through its environment. Cancel sends SIGTERM to
+the run's process group, and `run.sh` removes its containers on the way out. Each evaluation keeps `eval.json`,
+`events.jsonl` and `console.log` in `evals/<id>/`; the run itself is an ordinary `runs/<id>-<task>/` folder. Without
+GitHub sign-in configured, sign-in stays simulated but runs are still real; on the static site both are simulated.
+
 ```
 web/
   index.html                 the page shell: metadata, fonts, <div id="root">

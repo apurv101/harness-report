@@ -1,8 +1,10 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { FlowLayout } from '../components/onboarding/FlowLayout'
 import { SelectedRepo } from '../components/onboarding/SelectedRepo'
 import { Icon } from '../components/ui/Icon'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
+import { useEvaluation } from '../hooks/useEvaluation'
+import { BOWLING, progress } from '../lib/evaluation'
 import { FIZZBUZZ_OUTPUT } from '../lib/preview'
 import { usePreview } from '../state/PreviewContext'
 
@@ -10,8 +12,77 @@ const CHECKS = ['Repository fetched', 'Model connection verified', 'Environment 
 
 const FACTS = [['TASK RESULT', 'Passed'], ['MODEL CALLS', '6'], ['RUN TIME', '21s']] as const
 
-/** The example report the preview ends on.  Every number here is illustrative. */
+/** Step 4: the real run's outcome when there is one; otherwise the preview's example report. */
 export function ResultPage() {
+  const { evalId } = usePreview()
+  return evalId ? <LiveResult id={evalId} /> : <ExampleResult />
+}
+
+function LiveResult({ id }: { id: string }) {
+  useDocumentTitle('First task result · Harness Report')
+  const { repo, setEval } = usePreview()
+  const navigate = useNavigate()
+  const { state, events, error } = useEvaluation(id)
+  if (error && !state) return <FlowLayout step={4}><p className="flow-helper">Could not load the run: {error}</p></FlowLayout>
+  if (!state) return <FlowLayout step={4}><p className="flow-helper">Loading the result…</p></FlowLayout>
+  if (state.eval.status === 'running') return <Navigate to="/check" replace />
+
+  const ev = state.eval; const r = state.result; const t = r?.tests
+  const passed = ev.status === 'done' && r?.reward === 1
+  const { details, error: stopped } = progress(events, state.live, state)
+  const heading = ev.status === 'cancelled' ? 'Run cancelled.'
+    : ev.status === 'failed' ? 'The run stopped before the tests.'
+    : passed ? 'First task passed.' : 'First task finished.'
+  const sub = ev.status === 'done' && t?.total ? `${BOWLING.title} · ${t.passed} of ${t.total} tests passed`
+    : stopped ? `${BOWLING.title} · ${stopped}` : BOWLING.title
+  const facts: [string, string][] = [
+    ['TASK RESULT', ev.status !== 'done' ? '—' : passed ? 'Passed' : 'Failed'],
+    ['TESTS', t?.total ? `${t.passed}/${t.total}` : '—'],
+    ['MODEL CALLS', String(r?.calls ?? state.live.calls)],
+    ['AGENT TIME', r?.seconds != null ? `${r.seconds}s` : '—'],
+  ]
+  const log = events.filter(e => e.type === 'stage' || e.type === 'error')
+    .map(e => e.type === 'error' ? `[error] ${e.msg}` : `[${String(e.t ?? 0).padStart(4)}s] ${e.stage}: ${(e.msg || '').split('\n')[0]}`).join('\n')
+
+  return (
+    <FlowLayout step={4}>
+      <div className="success-heading">
+        <span className="success-symbol"><Icon name={passed ? 'check' : 'terminal'} /></span>
+        <div><h1 tabIndex={-1}>{heading}</h1><p>{sub}</p></div>
+      </div>
+      <SelectedRepo repo={ev.repo || repo!} />
+      <div className="flow-card">
+        <div className="result-banner">
+          <strong>{BOWLING.title}</strong>
+          <span className="pass-label">{passed ? <><Icon name="check" /> Passed</> : ev.status === 'done' ? 'Not passed' : ev.status}</span>
+        </div>
+        <div className="result-details">
+          <dl className="result-facts" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+            {facts.map(([term, value]) => <div key={term}><dt>{term}</dt><dd>{value}</dd></div>)}
+          </dl>
+          <div className="result-checks">
+            {details.filter(Boolean).map(d => <span key={d}><Icon name="check" /> {d!.split('\n')[0]}</span>)}
+          </div>
+          {t && t.failed > 0 && (
+            <div className="expected-output"><span>FAILED TESTS</span><code>{t.failed_names.slice(0, 8).join('\n')}{t.failed_names.length > 8 ? `\n… ${t.failed_names.length - 8} more` : ''}</code></div>
+          )}
+          <details>
+            <summary>View the run log</summary>
+            <pre>{log || 'No stages were recorded.'}</pre>
+          </details>
+        </div>
+      </div>
+      <div className="result-links">
+        {r && <Link className="text-link" to={`/runs/${encodeURIComponent(ev.run)}`}>Open the full run</Link>}
+        <button onClick={() => { setEval(null); navigate('/check') }}>Run again</button>
+        <Link to="/import" className="text-link">Choose another harness</Link>
+      </div>
+    </FlowLayout>
+  )
+}
+
+/** The example report the preview ends on.  Every number here is illustrative. */
+function ExampleResult() {
   useDocumentTitle('First task complete · Harness Report')
   const { repo, setResult } = usePreview()
   const navigate = useNavigate()

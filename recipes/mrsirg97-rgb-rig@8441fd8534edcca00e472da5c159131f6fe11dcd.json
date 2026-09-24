@@ -1,0 +1,48 @@
+{
+  "summary": "rig (github.com/mrsirg97-rgb/rig, v1.5.0) is a single Go binary agent loop: it assembles context, streams the model over an OpenAI-compatible chat-completions SSE wire (provider/openai, POST {base}/chat/completions with stream_options.include_usage and function-style tools), executes tool calls (bash, read/write/edit, ls/find/grep, diff, python IPython kernel, todo, rem, sessions, plugin doors) in the current working directory, and repeats. The entrypoint is `rig`; `rig -p \"<task>\"` runs one prompt headlessly via the oneshot frontend (final text on stdout, reasoning/tool markers on stderr, exit 1 on a faulted turn). Config resolves flag > env > $RIG_HOME files > embedded defaults; the model row is synthesized from RIG_MODEL_WINDOW, and RIG_MODEL_REMOTE/RIG_MODEL_BASE_URL/RIG_MODEL_API_KEY switch the provider to hosted mode (Authorization: Bearer, no llama-server-only chat_template_kwargs). Session transcripts land as SQLite under $RIG_HOME/sessions.",
+  "base_image": "debian:bookworm-slim",
+  "dockerfile": "ARG BASE=debian:bookworm-slim\nFROM ${BASE}\nARG GO_VERSION=1.26.8\nARG PY_VERSION=3.12\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git && rm -rf /var/lib/apt/lists/*\nCOPY . /opt/harness/src\nRUN set -eux; \\\n    arch=\"$(dpkg --print-architecture)\"; \\\n    case \"$arch\" in amd64) goarch=amd64 ;; arm64) goarch=arm64 ;; *) echo \"unsupported arch: $arch\" >&2; exit 1 ;; esac; \\\n    mkdir -p /opt/harness/bin /opt/harness/build; \\\n    curl -fsSL \"https://go.dev/dl/go${GO_VERSION}.linux-${goarch}.tar.gz\" | tar -C /opt/harness/build -xz; \\\n    cd /opt/harness/src && \\\n    CGO_ENABLED=0 GOTOOLCHAIN=local GOPATH=/opt/harness/build/gopath GOCACHE=/opt/harness/build/gocache \\\n    /opt/harness/build/go/bin/go build -trimpath -ldflags='-s -w' -o /opt/harness/bin/rig ./cmd/rig; \\\n    rm -rf /opt/harness/build\nRUN set -eux; \\\n    curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/opt/harness/bin UV_NO_MODIFY_PATH=1 sh; \\\n    export UV_PYTHON_INSTALL_DIR=/opt/harness/python; \\\n    /opt/harness/bin/uv python install \"${PY_VERSION}\"; \\\n    /opt/harness/bin/uv venv --python \"${PY_VERSION}\" /opt/harness/kernel-venv; \\\n    /opt/harness/bin/uv pip install --python /opt/harness/kernel-venv/bin/python ipython\nRUN printf 'export PATH=/opt/harness/bin:$PATH\\n' > /etc/profile.d/harness.sh && ln -sf /opt/harness/bin/rig /usr/local/bin/rig\nENV PATH=/opt/harness/bin:$PATH\nENV UV_PYTHON_INSTALL_DIR=/opt/harness/python\nENV RIG_PYTHON=/opt/harness/kernel-venv/bin/python\n",
+  "run_command": "mkdir -p /out \"$RIG_HOME\" && { rig -p \"$TASK\" 2> >(tee /out/rig-stderr.log >&2); } | tee /out/rig-stdout.log; exit \"${PIPESTATUS[0]}\"",
+  "check_command": "rig -version && /opt/harness/kernel-venv/bin/python -c 'import IPython; print(IPython.__version__)'",
+  "env": [
+    {
+      "name": "RIG_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "RIG_MODEL",
+      "value": "gpt-4.1"
+    },
+    {
+      "name": "RIG_MODEL_WINDOW",
+      "value": "200000"
+    },
+    {
+      "name": "RIG_MODEL_MAX_TOKENS",
+      "value": "16384"
+    },
+    {
+      "name": "RIG_MODEL_REMOTE",
+      "value": "true"
+    },
+    {
+      "name": "RIG_MODEL_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "RIG_MODEL_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "RIG_HOME",
+      "value": "/out/rig-home"
+    },
+    {
+      "name": "RIG_PYTHON",
+      "value": "/opt/harness/kernel-venv/bin/python"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "Verified locally with Docker (arm64) on both debian:bookworm-slim and buildpack-deps:jammy: check_command passes, and a --network none end-to-end run against an in-container mock OpenAI SSE server issued a `write` tool call that landed hello.txt in the task cwd, a `python` tool call that ran in the built IPython venv (returned 42), the second request carried the tool result, exit code 0, and the session SQLite landed in /out/rig-home/sessions. Requests hit $PROXY_URL/v1/chat/completions with `Authorization: Bearer proxy`, `stream: true`, `stream_options.include_usage`, and `tools`; no `chat_template_kwargs` because RIG_MODEL_REMOTE=true. Model name is arbitrary (the proxy substitutes it); RIG_MODEL_WINDOW synthesizes the required model row (reserve window/8, keep-recent window/4 for compaction). rig only speaks the OpenAI wire; there is no Anthropic path. The python tool would otherwise pip-bootstrap a venv over the network on first use, so the venv is prebuilt under /opt/harness and named by RIG_PYTHON. The web_search/web_fetch tools are still advertised but will fail without network (the allow-list only gates execution, not advertisement). Gotcha fixed in the overlay: Debian's /etc/profile resets root's PATH under `bash -lc`, so /etc/profile.d/harness.sh re-adds /opt/harness/bin (jammy did not need it). Go 1.26.8 is fetched from go.dev at build time (go.mod needs >=1.26.6; GOTOOLCHAIN=local prevents a second download) and the toolchain plus module cache are removed after the build; modernc sqlite is pure Go so CGO is off. Approval mode defaults to auto and the one-shot frontend never prompts; stdin is not read. A faulted turn exits 1, which the run command propagates. Logs: /out/rig-stdout.log (final answer), /out/rig-stderr.log (reasoning deltas, tool start/end, heartbeats), /out/rig-home/sessions/*.sqlite (full transcript, tool calls, usage)."
+}

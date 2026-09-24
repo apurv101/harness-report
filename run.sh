@@ -14,7 +14,9 @@
 #   --taskset S   a Harbor taskset: a directory of task folders, or a name under $HARBOR_TASKS/{datasets,hub-datasets,.}
 #   --tasks a,b   task folder names in the taskset      --grep re   regex on task names     --limit N   first N
 #   --all         every task in the taskset             -k N        runs per task (default 1)
-#   --rebuild     re-clone, re-analyze and rebuild the harness overlay
+#   --rebuild     re-clone, re-analyze from scratch (no seed recipe) and rebuild the harness overlay
+#   --platform P  image platform for every build and container (default: HR_PLATFORM, else linux/amd64 — what the
+#                 AWS runners are; on an arm64 Mac Docker emulates it, slower but the same images)
 #   --run-id ID   name the run (default: timestamp)
 #   --model M     model for this invocation, e.g. bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0 (default: MODEL in .env)
 #   --routes R    per-model routing, pattern=target,... first match wins, MODEL for the rest (default: ROUTES in .env)
@@ -27,28 +29,46 @@
 #                 calls.jsonl and run.json   enforce: flagged actions are rewritten to fail   off
 #   --block-url R refuse URLs matching regex R (repeatable; hosts only unless --egress inspect or plain http)
 #
-# Stages:   fetch     git clone → work/<name>/repo
+# Stages:   fetch     the repo's current HEAD → work/<name>/repo (an existing clone is fetched and reset to it)
 #           select    resolve the Harbor tasks; skip multi-container (docker-compose) ones; build the first task image
-#           analyze   claude -p reads the repo and returns a recipe: an OVERLAY Dockerfile (ARG BASE / FROM ${BASE})
-#                     that installs the harness self-contained under /opt/harness, the env that points it at the
-#                     proxy, the command that runs one task from $TASK, a check command    → work/<name>/recipe.json
+#           analyze   recipes are kept per commit in recipes/<name>@<sha>.json; the same commit reuses its recipe with
+#                     no AI call. A new commit runs claude -p, seeded with the last working recipe for this repo, which
+#                     reads the repo and returns a recipe: an OVERLAY Dockerfile (ARG BASE / FROM ${BASE}) that
+#                     installs the harness self-contained under /opt/harness, the env that points it at the proxy,
+#                     the command that runs one task from $TASK, a check command    → work/<name>/recipe.json
 #           build     docker build the overlay FROM the recipe's base image and FROM the first task image; the
-#                     check command runs in both; a failure goes back to the AI (3 tries)
+#                     check command runs in both; a failure goes back to the AI (3 tries). A recipe that passes is
+#                     saved to recipes/, and its diff against the seed goes into each run folder as recipe.diff.
+#                     Overlays are labelled with commit, recipe hash and platform, and rebuilt when any differs.
 #           proxy     start proxy.py (OpenAI + Anthropic API in, Bedrock out) with ~/.aws; the harness never sees creds
 #           run       per task and per k: task image → overlay → agent (instruction.md as $TASK) → tests/test.sh →
 #                     reward; every model call lands in runs/<run-id>/calls.jsonl
 #
 # Every run is one top-level folder, runs/<run-id>/ (<run-id> = timestamp or --run-id, plus -<task>[-k<i>] for a Harbor
 # task), holding task.txt command.sh recipe.json calls.jsonl stdout.log stderr.log proxy.log and run.json; a Harbor run
-# adds verifier/. run.json says where the run came from (kind prompt|harbor, harness repo+commit, task, model) — written
-# before the run starts — and gets rc, seconds, reward, calls and tokens merged in when it ends. `./run.sh runs` lists them.
+# adds verifier/. run.json says where the run came from (kind prompt|harbor, harness repo+commit, task, model, and
+# under provenance: platform, task and overlay image ids, recipe hash, proxy.py version) — written before the run
+# starts — and gets rc, seconds, reward, calls and tokens merged in when it ends. `./run.sh runs` lists them.
 #
 # .env holds MODEL (a target, e.g. bedrock/<model-id>), AWS_PROFILE, AWS_REGION (needed when any target is Bedrock);
 # optional ROUTES, ANTHROPIC_API_KEY / OPENAI_API_KEY (+ ANTHROPIC_BASE_URL / OPENAI_BASE_URL) for the passthrough
 # targets, ANALYZER_MODEL (claude -p model) and HARBOR_TASKS (default ~/Desktop/harbor-tasks).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-die() { echo "run.sh: $*" >&2; exit 2; }
+# emit key value ...: with $HR_EVENTS set (serve.py sets it for runs started from the site), append one JSON event per
+# call to that file — stages, the recipe decision, each task's run folder and result, errors. The terminal output is
+# unchanged; the events are what the UI reads to show progress.
+emit() {
+  [ -n "${HR_EVENTS:-}" ] || return 0
+  python3 - "$HR_EVENTS" "$@" <<'PY' || true
+import json, re, sys, time
+d = {"ts": round(time.time(), 3)}
+for k, v in zip(sys.argv[2::2], sys.argv[3::2]):
+    d[k] = json.loads(v) if re.fullmatch(r"-?\d+(\.\d+)?|null|true|false", v) else v
+with open(sys.argv[1], "a") as f: f.write(json.dumps(d) + "\n")
+PY
+}
+die() { echo "run.sh: $*" >&2; emit type error msg "$*"; exit 2; }
 help() { awk 'NR==1{next} /^#/{sub(/^# ?/,""); print; next} {exit}' "$0"; }
 [ $# -gt 0 ] || { help; exit 0; }
 [ -f "$HERE/.env" ] && { set -a; . "$HERE/.env"; set +a; }
@@ -164,9 +184,11 @@ fi
 # ------------------------------------------------------------------ args
 EGRESS="${EGRESS:-record}"; POLICY="${POLICY:-flag}"; BLOCK_URLS="${BLOCK_URLS:-}"
 URL=""; TASK=""; TASK_FILE=""; REBUILD=0; RUN_ID=""; TASKSET=""; TASK_NAMES=""; GREP=""; LIMIT=""; ALL=0; K=1
+PLATFORM="${HR_PLATFORM:-linux/amd64}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --rebuild) REBUILD=1 ;;
+    --platform) PLATFORM="${2:?}"; shift ;;
     --run-id) RUN_ID="${2:?}"; shift ;;
     --model) MODEL="${2:?}"; shift ;;
     --routes) ROUTES="${2:?}"; shift ;;
@@ -210,7 +232,7 @@ OWNER="${BASH_REMATCH[1]}"; REPO="${BASH_REMATCH[2]%.git}"
 NAME="$(printf '%s-%s' "$OWNER" "$REPO" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9.-\n' '-')"
 WORK="$HERE/work/$NAME"; SRC="$WORK/repo"; RECIPE="$WORK/recipe.json"; IMAGE="hr-$NAME"; WRAPPER="$WORK/run-harness"
 RUN_ID="${RUN_ID:-$(date +%Y%m%dT%H%M%S)}"; mkdir -p "$WORK"
-T0=$(date +%s); stage() { echo; echo "━━ [$1] $(( $(date +%s) - T0 ))s  ${2:-}"; }
+T0=$(date +%s); stage() { echo; echo "━━ [$1] $(( $(date +%s) - T0 ))s  ${2:-}"; emit type stage stage "$1" t "$(( $(date +%s) - T0 ))" msg "${2:-}"; }
 # portable timeout: coreutils timeout / gtimeout if present, else perl alarm (exit 142 on expiry)
 with_timeout() { local s="$1"; shift
   if command -v timeout >/dev/null 2>&1; then timeout "$s" "$@"
@@ -220,14 +242,35 @@ with_timeout() { local s="$1"; shift
 # resets PATH, which would hide the overlay's /opt/harness/bin; HR_PATH carries the image's PATH and PRELUDE restores it.
 PRELUDE='[ -n "${HR_PATH:-}" ] && export PATH="$HR_PATH"; '
 image_path() { docker image inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" | sed -n 's/^PATH=//p' | head -1; }
+image_platform() { docker image inspect -f '{{.Os}}/{{.Architecture}}' "$1" 2>/dev/null || true; }
+image_label() { docker image inspect -f "{{index .Config.Labels \"$2\"}}" "$1" 2>/dev/null || true; }
 echo "repo   https://github.com/$OWNER/$REPO   →   $NAME"
 echo "model  $MODEL   (via proxy)"
+echo "platform  $PLATFORM$([ "$PLATFORM" != "linux/$(docker version -f '{{.Server.Arch}}' 2>/dev/null)" ] && echo "   (emulated on this machine)")"
 
 # ------------------------------------------------------------------ 1. fetch
-stage fetch "git clone → work/$NAME/repo"
-if [ -d "$SRC/.git" ] && [ "$REBUILD" = 0 ]; then echo "already cloned ($(git -C "$SRC" rev-parse --short HEAD)); --rebuild to re-clone"
-else rm -rf "$SRC"; git clone -q --depth 1 "https://github.com/$OWNER/$REPO" "$SRC"; echo "cloned $(git -C "$SRC" rev-parse --short HEAD)"; fi
+stage fetch "current HEAD → work/$NAME/repo"
+# always the repo's current HEAD; an existing clone is only a download cache, reset to exactly that commit (no stray files,
+# since the whole tree is the build context)
+# A private repo is fetched with $HR_GIT_TOKEN (a short-lived GitHub App installation token that serve.py mints). It goes
+# to git only as an auth header through git's environment: never in a URL, a log line or .git/config, and it is unset
+# before the analyzer or any container starts.
+git_fetching() {
+  if [ -n "${HR_GIT_TOKEN:-}" ]; then
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+      GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$HR_GIT_TOKEN" | base64 | tr -d '\n')" git "$@"
+  else git "$@"; fi
+}
+UPSTREAM="https://github.com/$OWNER/$REPO"
+if [ -d "$SRC/.git" ] && [ "$REBUILD" = 0 ]; then
+  WAS="$(git -C "$SRC" rev-parse --short HEAD)"
+  git_fetching -C "$SRC" fetch -q --depth 1 "$UPSTREAM" HEAD && git -C "$SRC" reset -q --hard FETCH_HEAD && git -C "$SRC" clean -qfdx \
+    || die "could not fetch HEAD of $UPSTREAM"
+  NOW="$(git -C "$SRC" rev-parse --short HEAD)"; [ "$WAS" = "$NOW" ] && echo "at HEAD $NOW (unchanged)" || echo "updated $WAS → $NOW"
+else rm -rf "$SRC"; git_fetching clone -q --depth 1 "$UPSTREAM" "$SRC" || die "could not clone $UPSTREAM"; echo "cloned $(git -C "$SRC" rev-parse --short HEAD)"; fi
+unset HR_GIT_TOKEN
 COMMIT="$(git -C "$SRC" rev-parse HEAD)"
+emit type fetched commit "$COMMIT"
 printf '{"repo":"https://github.com/%s/%s","commit":"%s"}\n' "$OWNER" "$REPO" "$COMMIT" > "$WORK/source.json"
 
 # ------------------------------------------------------------------ 2. select (Harbor mode)
@@ -235,11 +278,11 @@ printf '{"repo":"https://github.com/%s/%s","commit":"%s"}\n' "$OWNER" "$REPO" "$
 task_image() {
   local tdir="$1" tag="hr-task/$2:$3" prebuilt
   if [ -f "$tdir/environment/Dockerfile" ]; then
-    docker build -q -t "$tag" "$tdir/environment" > "$WORK/task-build.log" 2>&1 || { tail -30 "$WORK/task-build.log" >&2; return 1; }
+    docker build -q --platform "$PLATFORM" -t "$tag" "$tdir/environment" > "$WORK/task-build.log" 2>&1 || { tail -30 "$WORK/task-build.log" >&2; return 1; }
   else
     IFS=$'\t' read -r _ _ _ _ _ _ prebuilt _ < <(task_meta "$tdir")
     [ -n "$prebuilt" ] || { echo "task $3 has neither environment/Dockerfile nor docker_image" >&2; return 1; }
-    docker image inspect "$prebuilt" >/dev/null 2>&1 || docker pull -q "$prebuilt" >/dev/null || return 1
+    [ "$(image_platform "$prebuilt")" = "$PLATFORM" ] || docker pull -q --platform "$PLATFORM" "$prebuilt" >/dev/null || return 1
     tag="$prebuilt"
   fi
   echo "$tag"
@@ -328,6 +371,13 @@ $tree"
 
 The overlay will also be built FROM this benchmark task image (its Dockerfile, comments stripped); the check command must pass there too:
 $FIRST_TASK_DF"
+  [ -z "$1" ] && [ -n "$SEED" ] && prompt="$prompt
+
+A RECIPE FOR AN EARLIER COMMIT OF THIS REPO ($SEED_COMMIT) BUILT, PASSED ITS CHECK AND RAN. This clone is at $COMMIT.
+Start from it and return it UNCHANGED unless this commit changed something it depends on (the entrypoint or CLI flags,
+manifests or lockfiles, build steps, runtime versions, env variables, config file formats). Change only what that
+requires. Results are compared across commits, so an unneeded change to the Docker setup is a cost, not an improvement.
+$(cat "$SEED")"
   [ -n "$1" ] && prompt="$prompt
 
 THE PREVIOUS RECIPE FAILED. Fix it. Previous recipe:
@@ -367,14 +417,19 @@ write_wrapper() {
 }
 check_image() {  # $1 = image: run the recipe's check command inside it, no network
   local chk; chk="$(recipe_field check_command)"
-  docker run --rm --network none -e "HR_PATH=$(image_path "$1")" "$1" bash -lc "$PRELUDE$chk" > "$WORK/check.log" 2>&1 \
+  docker run --rm --platform "$PLATFORM" --network none -e "HR_PATH=$(image_path "$1")" "$1" bash -lc "$PRELUDE$chk" > "$WORK/check.log" 2>&1 \
     || { echo "check command failed in $1: $chk"; tail -40 "$WORK/check.log"; return 1; }
 }
+recipe_hash() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:16])' "$RECIPE"; }
 BUILT=" "
 build_overlay() {  # $1 = base image, $2 = tag, $3 = force(0/1): docker build the overlay FROM $1, then the check
   case "$BUILT" in *" $2 "*) return 0;; esac
-  if [ "$3" = 0 ] && docker image inspect "$2" >/dev/null 2>&1; then echo "overlay $2 exists"; BUILT="$BUILT$2 "; return 0; fi
-  docker build -q --build-arg BASE="$1" -t "$2" -f "$WORK/Dockerfile" "$SRC" > "$WORK/build.log" 2>&1 \
+  # an existing image is reused only if it was built from this commit, this recipe and for this platform
+  local rh; rh="$(recipe_hash)"
+  if [ "$3" = 0 ] && [ "$(image_platform "$2")" = "$PLATFORM" ] && [ "$(image_label "$2" hr.commit)" = "$COMMIT" ] \
+     && [ "$(image_label "$2" hr.recipe)" = "$rh" ]; then echo "overlay $2 exists (${COMMIT:0:7}, recipe $rh, $PLATFORM)"; BUILT="$BUILT$2 "; return 0; fi
+  docker build -q --platform "$PLATFORM" --label hr.commit="$COMMIT" --label hr.recipe="$rh" \
+    --build-arg BASE="$1" -t "$2" -f "$WORK/Dockerfile" "$SRC" > "$WORK/build.log" 2>&1 \
     || { echo "docker build FROM $1 failed:"; tail -40 "$WORK/build.log"; return 1; }
   echo "overlay $2 built FROM $1"
   check_image "$2" || return 1
@@ -382,16 +437,33 @@ build_overlay() {  # $1 = base image, $2 = tag, $3 = force(0/1): docker build th
 }
 overlay_tag() { echo "$IMAGE/$TS_NAME:$1"; }
 
-NEED_ANALYZE=0; FORCE=0; [ "$REBUILD" = 1 ] && NEED_ANALYZE=1
-if [ ! -f "$RECIPE" ]; then NEED_ANALYZE=1; elif ! recipe_ok; then echo "recipe work/$NAME/recipe.json is from an older schema (not an overlay); re-analyzing"; NEED_ANALYZE=1; fi
+# Recipes are kept per commit: recipes/<name>@<sha>.json. The same commit reuses its recipe (no AI call); a new commit is
+# analyzed, seeded with the newest working recipe for this repo; --rebuild analyzes from scratch.
+# PREV is what the final recipe is diffed against (recipe.diff), so a changed result can be traced to a changed Docker setup.
+STORE="$HERE/recipes"; STORED="$STORE/$NAME@$COMMIT.json"; mkdir -p "$STORE"
+SEED=""; SEED_COMMIT=""; PREV=""; NEED_ANALYZE=0; FORCE=0
+if [ "$REBUILD" = 0 ] && [ -f "$STORED" ]; then
+  cp "$STORED" "$RECIPE"; cp "$STORED" "$WORK/prev.recipe.json"; PREV="$WORK/prev.recipe.json"
+  recipe_ok || { echo "recipes/$NAME@${COMMIT:0:12}.json is from an older schema (not an overlay); re-analyzing"; NEED_ANALYZE=1; }
+else
+  NEED_ANALYZE=1
+  if [ "$REBUILD" = 0 ]; then
+    SEED="$(ls -t "$STORE/$NAME@"*.json 2>/dev/null | head -1 || true)"
+    if [ -n "$SEED" ]; then SEED_COMMIT="$(basename "$SEED" .json)"; SEED_COMMIT="${SEED_COMMIT##*@}"
+    elif [ -f "$RECIPE" ] && recipe_ok; then  # a recipe from before the per-commit store; its commit is not known
+      cp "$RECIPE" "$WORK/seed.recipe.json"; SEED="$WORK/seed.recipe.json"; SEED_COMMIT="unknown (work/$NAME/recipe.json)"; fi
+    [ -z "$SEED" ] || { cp "$SEED" "$WORK/prev.recipe.json"; PREV="$WORK/prev.recipe.json"; }
+  fi
+fi
 FEEDBACK=""; OK=0
 for attempt in 1 2 3; do
   if [ "$NEED_ANALYZE" = 1 ]; then
-    stage analyze "attempt $attempt: claude -p reads the repo and writes the recipe (work/$NAME/{recipe.json,Dockerfile})"
-    if A="$(analyze "$FEEDBACK" 2>&1)"; then echo "$A"; else echo "$A"; FEEDBACK="$A"; continue; fi
-    FORCE=1
+    stage analyze "attempt $attempt: claude -p reads the repo at ${COMMIT:0:7} and writes the recipe$([ -n "$SEED" ] && [ -z "$FEEDBACK" ] && echo ", seeded with the recipe for ${SEED_COMMIT:0:12}")"
+    if A="$(analyze "$FEEDBACK" 2>&1)"; then echo "$A"; else echo "$A"; FEEDBACK="$A"; emit type recipe mode failed attempt "$attempt"; continue; fi
+    FORCE=1; emit type recipe mode analyzed attempt "$attempt" seeded_from "${SEED_COMMIT:-none}"
   else
-    stage analyze "recipe exists: work/$NAME/recipe.json (--rebuild to regenerate)"
+    stage analyze "recipe exists for ${COMMIT:0:7}: recipes/$NAME@${COMMIT:0:12}….json (no AI call; --rebuild to regenerate)"
+    recipe_field dockerfile > "$WORK/Dockerfile"; emit type recipe mode reused
     echo "api=$(recipe_field api_style)  base=$(recipe_field base_image)  run_command: $(recipe_field run_command)"
   fi
   write_wrapper
@@ -401,6 +473,26 @@ for attempt in 1 2 3; do
   else echo "$ERR"; FEEDBACK="$ERR"; NEED_ANALYZE=1; fi
 done
 [ "$OK" = 1 ] || die "could not build a working sandbox after 3 attempts; see work/$NAME/{build.log,check.log,analyze.stderr}"
+# the recipe built and passed its check: keep it for this commit, and say how it differs from the one before it
+[ "$FORCE" = 1 ] && { cp "$RECIPE" "$STORED"; echo "recipe saved: recipes/$(basename "$STORED")"; }
+emit type built image "$IMAGE" platform "$PLATFORM"
+rm -f "$WORK/recipe.diff"
+if [ -n "$PREV" ]; then
+  python3 - "$PREV" "$RECIPE" "$WORK/recipe.diff" <<'PY'
+import difflib, json, sys
+prev, new, out = sys.argv[1:]
+a, b = json.load(open(prev)), json.load(open(new))
+parts = []
+for k in sorted(set(a) | set(b)):
+    x, y = a.get(k), b.get(k)
+    if x == y or k in ("summary", "notes"): continue   # prose, not setup
+    x = x if isinstance(x, str) else json.dumps(x, indent=1); y = y if isinstance(y, str) else json.dumps(y, indent=1)
+    x, y = (x or "").rstrip("\n") + "\n", (y or "").rstrip("\n") + "\n"
+    parts.append("".join(difflib.unified_diff(x.splitlines(True), y.splitlines(True), f"previous/{k}", f"this/{k}")))
+if parts: open(out, "w").write("\n".join(p.rstrip("\n") + "\n" for p in parts))
+print(f"recipe vs previous: {'changed: ' + ', '.join(p.split(chr(10))[0].split('/')[-1] for p in parts) if parts else 'unchanged'}")
+PY
+fi
 
 # ------------------------------------------------------------------ 5. proxy image (one per invocation; one container per run)
 stage proxy "proxy image hr-proxy, model=$MODEL${ROUTES:+  routes=$ROUTES}  egress=$EGRESS  policy=$POLICY"
@@ -410,7 +502,7 @@ docker network inspect hr-int >/dev/null 2>&1 || docker network create --interna
 CONTROL_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(16))')"   # lets run.sh (not the harness) open the verify phase
 PCTX="$WORK/.proxy-ctx"; mkdir -p "$PCTX"; cp "$HERE/proxy.py" "$HERE/policy.py" "$PCTX/"
 printf 'FROM python:3.12-slim\nRUN pip install -q --root-user-action=ignore boto3 cryptography\nCOPY proxy.py policy.py /\nCMD ["python3","-u","/proxy.py"]\n' > "$PCTX/Dockerfile"
-docker build -q -t hr-proxy "$PCTX" >/dev/null
+docker build -q --platform "$PLATFORM" -t hr-proxy "$PCTX" >/dev/null
 CUR_PROXY=""; CUR_RUN=""; CUR_OUT=""
 finish_containers() {
   [ -n "$CUR_RUN" ] && { docker rm -f "$CUR_RUN" >/dev/null 2>&1 || true; }
@@ -418,6 +510,8 @@ finish_containers() {
   CUR_RUN=""; CUR_PROXY=""
 }
 trap finish_containers EXIT
+# a cancel from the site is a SIGTERM to this process group: exit through the EXIT trap so the containers go too
+trap 'emit type error msg "cancelled"; exit 143' TERM INT
 start_proxy() {  # $1 = container name, $2 = out dir → sets PROXY_URL
   CUR_PROXY="$1"; CUR_OUT="$2"
   docker rm -f "$1" >/dev/null 2>&1 || true
@@ -428,7 +522,7 @@ start_proxy() {  # $1 = container name, $2 = out dir → sets PROXY_URL
   # verifier_leak check; the harness container never gets them before the verify stage
   local TMOUNT=(); if [ -n "${TDIR:-}" ] && [ -d "$TDIR/tests" ]; then TMOUNT+=(-v "$TDIR/tests:/hr/tests:ro" -e TESTS_DIR=/hr/tests)
     [ -d "$TDIR/environment" ] && TMOUNT+=(-v "$TDIR/environment:/hr/env:ro" -e ENV_DIR=/hr/env); fi
-  docker run -d --name "$1" --network hr-net -v "$HOME/.aws:/root/.aws:ro" -v "$2:/out" \
+  docker run -d --platform "$PLATFORM" --name "$1" --network hr-net -v "$HOME/.aws:/root/.aws:ro" -v "$2:/out" \
     -e "MODEL=$MODEL" -e "ROUTES=$ROUTES" -e "AWS_REGION=$AWS_REGION" -e "AWS_DEFAULT_REGION=$AWS_REGION" -e LOG=/out/calls.jsonl \
     -e "EGRESS=$EGRESS" -e "POLICY=$POLICY" -e "BLOCK_URLS=$BLOCK_URLS" -e "CONTROL_TOKEN=$CONTROL_TOKEN" -e "SELF_HOSTS=$1" \
     ${PENV[@]+"${PENV[@]}"} ${TMOUNT[@]+"${TMOUNT[@]}"} hr-proxy >/dev/null
@@ -469,6 +563,25 @@ rec = {"run": run, "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "finished": No
        "interception": {"egress": egress, "policy": pol, "block_urls": [b for b in blocks.split("\n") if b]}, "workdir": workdir, "run_command": cmd}
 json.dump(rec, open(f"{out}/run.json", "w"), indent=2)
 PY
+  [ -f "$WORK/recipe.diff" ] && cp "$WORK/recipe.diff" "$OUT/recipe.diff"
+  # run.json provenance: exactly what ran, so two runs (laptop or AWS) can be compared field by field
+  python3 - "$OUT" "$PLATFORM" "linux/$(docker version -f '{{.Server.Arch}}' 2>/dev/null)" "$(docker version -f '{{.Server.Version}}' 2>/dev/null)" \
+    "${TIMG:-}" "$(docker image inspect -f '{{.Id}}' "${TIMG:-none}" 2>/dev/null || true)" "$OTAG" "$(docker image inspect -f '{{.Id}}' "$OTAG" 2>/dev/null || true)" \
+    "$(recipe_hash)" "$COMMIT" "$([ "$FORCE" = 1 ] && echo "${SEED_COMMIT:-none}" || echo reused)" "$([ -f "$WORK/recipe.diff" ] && echo 1 || echo 0)" \
+    "$(git -C "$HERE" log -1 --format=%H -- proxy.py 2>/dev/null || true)" "$(git -C "$HERE" diff --quiet HEAD -- proxy.py 2>/dev/null && echo 0 || echo 1)" "$HERE/proxy.py" <<'PY'
+import hashlib, json, sys
+out, plat, host, dver, timg, timg_id, otag, otag_id, rh, commit, seeded, changed, pcommit, pdirty, proxy = sys.argv[1:]
+rec = json.load(open(f"{out}/run.json"))
+rec["provenance"] = {
+    "platform": plat, "host_platform": host, "emulated": plat != host, "docker": dver,
+    "task_image": {"tag": timg, "id": timg_id} if timg else None, "overlay_image": {"tag": otag, "id": otag_id},
+    "recipe": {"sha256": rh, "commit": commit, "file": f"recipes/{rec['harness']['name']}@{commit}.json",
+               "analyzed_now": seeded != "reused", "seeded_from": None if seeded in ("reused", "none") else seeded,
+               "changed_vs_previous": changed == "1"},
+    "proxy": {"commit": pcommit or None, "modified": pdirty == "1", "sha256": hashlib.sha256(open(proxy, "rb").read()).hexdigest()[:16]}}
+json.dump(rec, open(f"{out}/run.json", "w"), indent=2)
+PY
+  emit type run run "$RUN" task "$TASKNAME"
   stage proxy "recording → ${OUT#$HERE/}/calls.jsonl"
   start_proxy "hr-proxy-$RUN" "$OUT"
   local ENV_ARGS=(); while IFS= read -r kv; do ENV_ARGS+=(-e "$kv"); done < <(
@@ -477,7 +590,7 @@ for e in json.load(open(sys.argv[1]))["env"]: print(e["name"]+"="+e["value"].rep
   stage run "$TASKNAME  cwd=$WORKDIR  timeout=${AGENT_T}s  $RUN_CMD"
   CUR_RUN="hr-run-$RUN"; docker rm -f "$CUR_RUN" >/dev/null 2>&1 || true
   local LOGS_MOUNT=(); [ -z "$TDIR" ] || LOGS_MOUNT=(-v "$OUT:/logs")   # Harbor: /logs/agent, /logs/verifier/reward.txt
-  docker run -d --name "$CUR_RUN" --network "$HNET" -w "$WORKDIR" ${RES_ARGS[@]+"${RES_ARGS[@]}"} \
+  docker run -d --platform "$PLATFORM" --name "$CUR_RUN" --network "$HNET" -w "$WORKDIR" ${RES_ARGS[@]+"${RES_ARGS[@]}"} \
     -v "$OUT:/out" ${LOGS_MOUNT[@]+"${LOGS_MOUNT[@]}"} -v "$INSTR:/task/instruction.md:ro" -v "$WRAPPER:/usr/local/bin/run-harness:ro" \
     -e "PROXY_URL=$PROXY_URL" -e "HR_PATH=$(image_path "$OTAG")" -e TEST_DIR=/tests ${HENV[@]+"${HENV[@]}"} ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} "$OTAG" sleep infinity >/dev/null
   local START; START=$(date +%s); set +e
@@ -528,6 +641,7 @@ e = rec["egress"]; print(f"egress: {e['connections']} connections, {e['blocked']
       + (f"   flags: {rec['flags']}" if rec["flags"] else "") + (f"   rewrites: {rec['rewrites']}" if rec["rewrites"] else ""))
 if not calls: print("WARNING: no model calls reached the proxy (check stderr.log and the env in recipe.json)", file=sys.stderr)
 PY
+  emit type result run "$RUN" task "$TASKNAME" rc "$RC" reward "$REWARD" seconds "$SECS"
 }
 
 if [ -z "$TASKSET" ]; then
@@ -548,9 +662,11 @@ for TASKNAME in "${TASKS[@]}"; do
   IFS=$'\t' read -r _ _ AGENT_T VERIF_T CPUS MEM _ _ < <(task_meta "$TDIR")
   RES_ARGS=(); [ -n "$CPUS" ] && RES_ARGS+=(--cpus "$CPUS"); [ -n "$MEM" ] && RES_ARGS+=(--memory "$MEM")
   stage task "$TASKNAME  (agent ${AGENT_T}s, verifier ${VERIF_T}s${CPUS:+, cpus $CPUS}${MEM:+, mem $MEM})"
-  if ! TIMG="$(task_image "$TDIR" "$TS_NAME" "$TASKNAME")"; then echo "task image failed for $TASKNAME; see work/$NAME/task-build.log"; INFRA_FAIL=1; continue; fi
+  if ! TIMG="$(task_image "$TDIR" "$TS_NAME" "$TASKNAME")"; then echo "task image failed for $TASKNAME; see work/$NAME/task-build.log"; emit type error msg "task image failed for $TASKNAME"; INFRA_FAIL=1; continue; fi
   OTAG="$(overlay_tag "$TASKNAME")"
-  if ! ERR="$(build_overlay "$TIMG" "$OTAG" "$FORCE" 2>&1)"; then echo "$ERR"; echo "overlay failed for $TASKNAME (recorded, skipping)"; INFRA_FAIL=1; continue; fi
+  # 0, not $FORCE: the labels already tie an image to this commit, recipe and platform; the attempt loop above built and
+  # checked the first task's overlay inside $( ), so forcing here would only rebuild it a second time
+  if ! ERR="$(build_overlay "$TIMG" "$OTAG" 0 2>&1)"; then echo "$ERR"; echo "overlay failed for $TASKNAME (recorded, skipping)"; emit type error msg "overlay build failed for $TASKNAME"; INFRA_FAIL=1; continue; fi
   echo "$ERR"
   WORKDIR="$(docker image inspect -f '{{.Config.WorkingDir}}' "$TIMG")"; WORKDIR="${WORKDIR:-/app}"
   INSTR="$TDIR/instruction.md"

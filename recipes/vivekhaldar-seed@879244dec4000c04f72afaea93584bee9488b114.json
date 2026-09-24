@@ -1,0 +1,56 @@
+{
+  "summary": "seed (vivekhaldar/seed) is a minimal single-file agent (seed.py, console script `seed` = seed:main). It uses Simon Willison's `llm` library with one tool, `exec` (bash in cwd), loads its system prompt from ./self/SELF.md, and runs a REPL reading user turns from stdin via input() until EOF, calling conversation.chain() for each turn. Model selection is `-m <llm model id>`. We route model calls to the proxy by registering an OpenAI-compatible chat model in llm's extra-openai-models.yaml (in LLM_USER_PATH) with api_base=$PROXY_URL/v1 and supports_tools: true, so llm's OpenAI Chat client (openai SDK, chat-completions, streaming + tools) talks only to the proxy. The task is piped in as a single stdin line; EOF then ends the session. The per-session transcript (self/sessions/*.json) is copied to /out.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\nUSER root\nRUN apt-get update \\\n && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git \\\n && rm -rf /var/lib/apt/lists/*\nENV UV_PYTHON_INSTALL_DIR=/opt/harness/python \\\n    UV_CACHE_DIR=/opt/harness/uv-cache \\\n    UV_NO_MODIFY_PATH=1\nRUN mkdir -p /opt/harness/bin \\\n && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/opt/harness/bin UV_NO_MODIFY_PATH=1 sh \\\n && /opt/harness/bin/uv python install 3.12\nCOPY . /opt/harness/src\nRUN /opt/harness/bin/uv venv --python 3.12 /opt/harness/venv \\\n && /opt/harness/bin/uv pip install --python /opt/harness/venv/bin/python /opt/harness/src \\\n && ln -sf /opt/harness/venv/bin/seed /opt/harness/bin/seed \\\n && ln -sf /opt/harness/venv/bin/llm /opt/harness/bin/llm \\\n && rm -rf /opt/harness/uv-cache \\\n && chmod -R a+rX /opt/harness\nENV PATH=/opt/harness/bin:$PATH\n",
+  "run_command": "mkdir -p /out/llm\ncat > /out/llm/extra-openai-models.yaml <<EOF\n- model_id: proxy-model\n  model_name: gpt-4o\n  api_base: \"$PROXY_URL/v1\"\n  api_key_name: openai\n  supports_tools: true\nEOF\nprintf '%s\\n' \"$(printf '%s' \"$TASK\" | tr '\\r\\n' '  ')\" | seed -m proxy-model 2>&1 | tee /out/seed-console.log\nrc=${PIPESTATUS[1]}\nmkdir -p /out/sessions && cp -r self/sessions/. /out/sessions/ 2>/dev/null || true\nexit $rc",
+  "check_command": "seed --help && LLM_USER_PATH=/tmp/llmcheck llm --version",
+  "env": [
+    {
+      "name": "LLM_USER_PATH",
+      "value": "/out/llm"
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "PYTHONUNBUFFERED",
+      "value": "1"
+    },
+    {
+      "name": "GIT_AUTHOR_NAME",
+      "value": "seed"
+    },
+    {
+      "name": "GIT_AUTHOR_EMAIL",
+      "value": "seed@localhost"
+    },
+    {
+      "name": "GIT_COMMITTER_NAME",
+      "value": "seed"
+    },
+    {
+      "name": "GIT_COMMITTER_EMAIL",
+      "value": "seed@localhost"
+    },
+    {
+      "name": "GIT_CONFIG_COUNT",
+      "value": "1"
+    },
+    {
+      "name": "GIT_CONFIG_KEY_0",
+      "value": "safe.directory"
+    },
+    {
+      "name": "GIT_CONFIG_VALUE_0",
+      "value": "*"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "Unchanged from the recipe for cd79a60. The only change between cd79a60 and 879244d is in install.sh, which this recipe doesn't use; seed.py and pyproject.toml are the same.\n- seed.py's REPL reads each turn with input(), so a multi-line $TASK would turn into several separate turns. The run command joins the task into one line (newlines become spaces) and pipes it in. EOF then ends the session cleanly.\n- The model id \"proxy-model\" is registered at run time in $LLM_USER_PATH/extra-openai-models.yaml, with api_base set to $PROXY_URL/v1 and supports_tools: true. The upstream model name sent is gpt-4o, and the proxy may replace it.\n- Side effects the harness has by design: it copies seed.py and run_seed.sh into cwd and creates self/SELF.md. It also runs git init and makes a genesis commit, or nests the repo in self/ if cwd is already a repo. The git identity and safe.directory env vars keep that step from failing.\n- Trajectory: self/sessions/*.json is copied to /out/sessions/. Console output goes to /out/seed-console.log."
+}

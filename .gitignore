@@ -8,3 +8,4 @@ __pycache__/
 .auth/
 web/node_modules/
 web/dist/
+/evals/

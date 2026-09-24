@@ -1,0 +1,64 @@
+{
+  "summary": "Aider is a terminal AI pair-programming harness written in Python (package `aider-chat`, console entrypoint `aider = aider.main:main`). It edits files in the current working directory (using git for its repo map and change tracking) and makes every LLM call through litellm: `aider/llm.py` lazy-loads litellm and `Model.send_completion` in `aider/models.py` calls `litellm.completion` with the model name, streaming flag and optional tool spec. Using an `openai/<name>` model makes litellm's OpenAI chat-completions client honour `OPENAI_API_BASE`/`OPENAI_BASE_URL`, so all requests (main, weak and editor models) go to `$PROXY_URL/v1/chat/completions`. A single non-interactive task is run with `--message \"$TASK\"` plus `--yes-always`, which answers every confirmation, applies the edits and exits after one turn; chat and full LLM request/response history files are written under /out.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\n\n# System deps aider needs at run time (git for GitPython / repo map). Does not touch the base's python/node.\nRUN apt-get update \\\n && apt-get install --no-install-recommends -y ca-certificates curl git \\\n && rm -rf /var/lib/apt/lists/*\n\n# Self-contained Python runtime + venv under /opt/harness via uv\nENV UV_INSTALL_DIR=/opt/harness/uv \\\n    UV_PYTHON_INSTALL_DIR=/opt/harness/python \\\n    UV_CACHE_DIR=/opt/harness/uv-cache \\\n    UV_LINK_MODE=copy\nRUN mkdir -p /opt/harness/bin \\\n && curl -LsSf https://astral.sh/uv/install.sh | sh \\\n && /opt/harness/uv/uv python install 3.12 \\\n && /opt/harness/uv/uv venv --python 3.12 /opt/harness/venv\n\n# Install aider from the repo source (build context = repo root)\nCOPY . /opt/harness/src\n# setuptools_scm needs a version when .git is not in the build context\nENV SETUPTOOLS_SCM_PRETEND_VERSION=0.86.3\nRUN /opt/harness/uv/uv pip install --python /opt/harness/venv/bin/python --no-cache /opt/harness/src \\\n && rm -rf /opt/harness/uv-cache\n\n# Expose only the harness CLI on PATH. The console script has an absolute shebang to the venv\n# python, so a symlink is fine. harness-python must be a wrapper, NOT a symlink: CPython looks for\n# pyvenv.cfg next to the *unresolved* argv0, so a symlink in /opt/harness/bin would run the base\n# interpreter without the venv's site-packages.\nRUN ln -sf /opt/harness/venv/bin/aider /opt/harness/bin/aider \\\n && printf '#!/bin/sh\\nexec /opt/harness/venv/bin/python \"$@\"\\n' > /opt/harness/bin/harness-python \\\n && chmod +x /opt/harness/bin/harness-python\n\nENV PATH=/opt/harness/bin:$PATH\nRUN mkdir -p /out && chmod 777 /out\n",
+  "run_command": "mkdir -p /out && aider --yes-always --no-pretty --no-fancy-input --no-stream --no-show-model-warnings --no-check-update --no-show-release-notes --analytics-disable --no-auto-commits --no-dirty-commits --no-gitignore --no-suggest-shell-commands --no-detect-urls --no-auto-lint --chat-history-file /out/aider.chat.history.md --input-history-file /out/aider.input.history --llm-history-file /out/aider.llm.history --message \"$TASK\"",
+  "check_command": "aider --version && aider --help >/dev/null && harness-python -c \"import aider, litellm; print(aider.__version__)\"",
+  "env": [
+    {
+      "name": "OPENAI_API_BASE",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "AIDER_MODEL",
+      "value": "openai/gpt-4o"
+    },
+    {
+      "name": "AIDER_WEAK_MODEL",
+      "value": "openai/gpt-4o"
+    },
+    {
+      "name": "AIDER_EDITOR_MODEL",
+      "value": "openai/gpt-4o"
+    },
+    {
+      "name": "AIDER_ANALYTICS_DISABLE",
+      "value": "true"
+    },
+    {
+      "name": "AIDER_CHECK_UPDATE",
+      "value": "false"
+    },
+    {
+      "name": "HOME",
+      "value": "/tmp"
+    },
+    {
+      "name": "LITELLM_LOCAL_MODEL_COST_MAP",
+      "value": "True"
+    },
+    {
+      "name": "LITELLM_TELEMETRY",
+      "value": "False"
+    },
+    {
+      "name": "PYTHONUNBUFFERED",
+      "value": "1"
+    },
+    {
+      "name": "TERM",
+      "value": "dumb"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "Fix vs previous recipe: the check failed at `harness-python -c \"import aider\"` because harness-python was a symlink into the venv. CPython resolves pyvenv.cfg relative to the unresolved argv0 directory (/opt/harness/bin), found none, and fell back to the base interpreter under /opt/harness/python, which has no aider installed. harness-python is now a tiny sh wrapper that execs /opt/harness/venv/bin/python directly. `aider` stays a symlink because console scripts have an absolute shebang to the venv python (that is why `aider --version` already worked). PATH now only prepends /opt/harness/bin so the base image's python3/pip3 are not shadowed. Model choice: `openai/gpt-4o` is in aider's model-settings (diff edit format, repo map on) and the `openai/` prefix routes litellm to the OpenAI chat-completions client using OPENAI_API_BASE, so the proxy sees plain /v1/chat/completions; weak and editor models are pinned to the same name so nothing escapes to another provider. AIDER_* env vars are read via configargparse (auto_env_var_prefix=\"AIDER_\"). `--yes-always` answers all confirm prompts (stdin is not a tty), including creating a git repo in the task dir if none exists so the repo map works; `--no-auto-commits --no-dirty-commits --no-gitignore` keep aider from committing or editing .gitignore; `--no-suggest-shell-commands` prevents auto-running LLM-suggested shell commands; `--no-auto-lint` skips flake8 follow-up turns. `--no-check-update` and `--analytics-disable` remove pypi/posthog network use; LITELLM_LOCAL_MODEL_COST_MAP=True stops litellm fetching its cost map from GitHub. Aider's own ModelInfoManager tries to fetch litellm's model_prices JSON from GitHub once per 24h into ~/.aider/caches; the failure without network is caught and only affects context-window/cost display. HOME=/tmp gives a writable ~/.aider. `--no-stream` is only for cleaner non-tty logs; streaming works through the proxy. Trajectory: /out/aider.llm.history (full LLM request/response log) and /out/aider.chat.history.md. SETUPTOOLS_SCM_PRETEND_VERSION is needed because .git may be absent from the build context (.dockerignore)."
+}

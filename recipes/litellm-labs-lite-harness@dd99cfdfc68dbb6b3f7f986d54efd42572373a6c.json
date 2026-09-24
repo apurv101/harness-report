@@ -1,0 +1,56 @@
+{
+  "summary": "lite-harness is an SDK (Python + TypeScript clients) fronting a Node \"stream-json\" backend server, src/sdk/server/server.mjs, that speaks the Claude Agent SDK stdio protocol (one JSON object per line on stdin/stdout) and drives real agent SDKs in-process: the `claude` provider runs @anthropic-ai/claude-agent-sdk (which spawns its bundled Claude Code cli.js), `codex` runs @openai/codex-sdk, `pi-ai` runs pi-agent-core (no tools). There is no other CLI; the server is the entrypoint, and one task is executed by piping a single `{\"type\":\"user\",\"message\":{\"content\":...}}` line into it and reading frames until the trailing `result`, after which the server exits on stdin EOF. Model calls go through the Claude Code CLI to the Anthropic Messages API, so routing is done with ANTHROPIC_BASE_URL=$PROXY_URL / ANTHROPIC_API_KEY, and the model comes from LITELLM_DEFAULT_MODEL (the provider's own default-model variable) when --model is omitted.",
+  "base_image": "debian:bookworm-slim",
+  "dockerfile": "ARG BASE=debian:bookworm-slim\nFROM ${BASE}\n\n# lite-harness overlay: self-contained Node runtime + the server and its deps under /opt/harness.\n# The base image's own python/node/toolchains are left untouched.\nARG NODE_MAJOR=22\nENV DEBIAN_FRONTEND=noninteractive\n\nRUN apt-get update \\\n && apt-get install -y --no-install-recommends ca-certificates curl xz-utils git bash \\\n && rm -rf /var/lib/apt/lists/*\n\n# Official Node tarball (latest v22.x LTS) unpacked into /opt/harness/node.\nRUN set -eux; \\\n    case \"$(uname -m)\" in x86_64) a=x64 ;; aarch64|arm64) a=arm64 ;; *) echo \"unsupported arch\"; exit 1 ;; esac; \\\n    f=\"$(curl -fsSL \"https://nodejs.org/dist/latest-v${NODE_MAJOR}.x/SHASUMS256.txt\" | awk -v s=\"linux-${a}.tar.xz\\$\" '$2 ~ s {print $2}')\"; \\\n    mkdir -p /opt/harness/node; \\\n    curl -fsSL \"https://nodejs.org/dist/latest-v${NODE_MAJOR}.x/${f}\" | tar -xJ -C /opt/harness/node --strip-components=1\n\nENV PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH\n\n# The harness source (unmodified) and the server's npm dependencies.\nCOPY . /opt/harness/src\nRUN cd /opt/harness/src/src/sdk/server \\\n && npm install --omit=dev --no-audit --no-fund \\\n && npm cache clean --force\n\n# Launcher matching the package's declared bin name (`lite-harness-server`).\n# Login shells (`bash -lc`) re-read /etc/profile, which resets PATH, so also\n# register the harness bin dirs via profile.d.\nRUN mkdir -p /opt/harness/bin \\\n && printf '#!/usr/bin/env bash\\nexec /opt/harness/node/bin/node /opt/harness/src/src/sdk/server/server.mjs \"$@\"\\n' > /opt/harness/bin/lite-harness-server \\\n && chmod +x /opt/harness/bin/lite-harness-server \\\n && mkdir -p /etc/profile.d \\\n && printf 'export PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH\\n' > /etc/profile.d/lite-harness.sh\n",
+  "run_command": "mkdir -p /out && set -o pipefail && node -e 'process.stdout.write(JSON.stringify({type:\"user\",message:{role:\"user\",content:process.env.TASK},session_id:null,parent_tool_use_id:null})+\"\\n\")' | lite-harness-server --input-format stream-json --output-format stream-json --verbose --agent \"${LITE_HARNESS_DEFAULT_AGENT:-claude}\" --permission-mode bypassPermissions --cwd \"$PWD\" | tee /out/trajectory.jsonl",
+  "check_command": "printf '{\"type\":\"control_request\",\"request_id\":\"req_1\",\"request\":{\"subtype\":\"list_harnesses\"}}\\n' | lite-harness-server --input-format stream-json --output-format stream-json --cwd \"$PWD\" | grep -q '\"claude-code\"' && test -f /opt/harness/src/src/sdk/server/node_modules/@anthropic-ai/claude-agent-sdk/cli.js && node --version",
+  "env": [
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "LITE_HARNESS_DEFAULT_AGENT",
+      "value": "claude"
+    },
+    {
+      "name": "LITELLM_DEFAULT_MODEL",
+      "value": "claude-sonnet-4-6"
+    },
+    {
+      "name": "CLAUDE_CONFIG_DIR",
+      "value": "/out/claude-config"
+    },
+    {
+      "name": "IS_SANDBOX",
+      "value": "1"
+    },
+    {
+      "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_TELEMETRY",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_ERROR_REPORTING",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_AUTOUPDATER",
+      "value": "1"
+    },
+    {
+      "name": "CI",
+      "value": "1"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Verified locally with Docker: built the overlay on debian:bookworm-slim and on buildpack-deps:jammy; the check command passes on both via `bash -lc`. An end-to-end run against a fake Anthropic Messages server (SSE tool_use -> Write -> end_turn) wrote /work/hello.txt as root under bypassPermissions, emitted the terminal `result` frame, exited 0 in ~6s, and left /out/trajectory.jsonl (server NDJSON frames) plus Claude Code's own session transcript under /out/claude-config/projects/. Key gotchas: (1) `bash -lc` re-sources /etc/profile which resets PATH, hence the profile.d entry and absolute node path in the launcher; (2) the Claude Code CLI refuses bypassPermissions as root unless IS_SANDBOX=1; (3) the server keeps running the turn after stdin EOF and exits when the SDK child finishes, so a one-line pipe is enough. Model selection: --model is omitted so the provider's LITELLM_DEFAULT_MODEL applies; any claude-* name works since the proxy replaces it (the CLI also fires side requests with sonnet-4-5/haiku model ids, which the proxy will likewise remap). The lockfile only pins darwin-arm64 optional platform packages, so the Dockerfile uses `npm install` rather than `npm ci` to let npm resolve the linux variants. Alternative agents: setting LITE_HARNESS_DEFAULT_AGENT=codex plus LITELLM_API_BASE=$PROXY_URL and LITELLM_API_KEY=proxy would route the Codex CLI through $PROXY_URL/v1 (OpenAI style) but this path was not tested; `pi-ai` has no tools and cannot edit files. Leftover on the host: a scratch copy at harness-report/work/litellm-labs-lite-harness/scratch (safe to delete; removal was blocked by a safety check) and the overlay/test files in .../litellm-labs-lite-harness/overlay/."
+}

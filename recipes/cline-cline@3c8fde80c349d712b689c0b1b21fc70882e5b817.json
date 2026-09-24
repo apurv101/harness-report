@@ -1,0 +1,56 @@
+{
+  "summary": "Cline is a TypeScript monorepo (Bun 1.3.13 workspaces) whose terminal agent lives in apps/cli (package @cline/cli, entry apps/cli/src/index.ts, bundled to apps/cli/dist/index.js by `bun -F @cline/cli build` after `bun run build:sdk` compiles the @cline/shared|llms|agents|core|sdk|ui packages to dist/). The bundle must be executed by Bun, not Node, because the TUI layer (@opentui/core) uses bun:ffi. One-shot headless use is `cline --yolo \"<prompt>\"`: yolo auto-approves every tool, enables submit_and_exit, and (together with --data-dir sandbox mode) forces an in-process local backend so no hub daemon is spawned. Model calls go through @cline/llms; the `openai-compatible` provider uses @ai-sdk/openai-compatible chat completions against a per-provider baseUrl stored in <data-dir>/settings/providers.json, which `cline auth --provider openai-compatible --baseurl <url> --apikey <k> --modelid <m> --data-dir <dir>` writes non-interactively. The API key also resolves from OPENAI_API_KEY. Telemetry (PostHog/OTel) is compiled out unless TELEMETRY_SERVICE_API_KEY / OTEL_TELEMETRY_ENABLED are set at build time, and CLINE_NO_AUTO_UPDATE=1 skips the startup update check.",
+  "base_image": "buildpack-deps:bookworm",
+  "dockerfile": "ARG BASE=buildpack-deps:bookworm\nFROM ${BASE}\n\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update \\\n && apt-get install -y --no-install-recommends ca-certificates curl git unzip bash \\\n && rm -rf /var/lib/apt/lists/*\n\n# Self-contained Bun runtime under /opt/harness (the Cline CLI must run on Bun: OpenTUI uses bun:ffi).\nARG BUN_VERSION=1.3.13\nENV BUN_INSTALL=/opt/harness/bun \\\n    BUN_INSTALL_CACHE_DIR=/opt/harness/bun/cache \\\n    PATH=/opt/harness/bin:/opt/harness/bun:$PATH\nRUN set -eux; \\\n    arch=\"$(uname -m)\"; \\\n    case \"$arch\" in \\\n      x86_64)  pkg=bun-linux-x64 ;; \\\n      aarch64|arm64) pkg=bun-linux-aarch64 ;; \\\n      *) echo \"unsupported arch $arch\" >&2; exit 1 ;; \\\n    esac; \\\n    mkdir -p /opt/harness/bun /opt/harness/bin /tmp/bun; \\\n    curl -fsSL -o /tmp/bun.zip \"https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/${pkg}.zip\"; \\\n    unzip -q /tmp/bun.zip -d /tmp/bun; \\\n    mv \"/tmp/bun/${pkg}/bun\" /opt/harness/bun/bun; \\\n    chmod +x /opt/harness/bun/bun; \\\n    ln -s /opt/harness/bun/bun /opt/harness/bun/bunx; \\\n    rm -rf /tmp/bun /tmp/bun.zip; \\\n    /opt/harness/bun/bun --version\n\n# Harness source (repo root) -> /opt/harness/src. Build the SDK packages, then the CLI bundle.\nCOPY . /opt/harness/src\nRUN cd /opt/harness/src \\\n && bun install \\\n && bun run build:sdk \\\n && bun -F @cline/cli build \\\n && test -f /opt/harness/src/apps/cli/dist/index.js\n\n# Entrypoint wrapper: runs the harness's own CLI bundle under Bun.\nRUN printf '%s\\n' '#!/usr/bin/env bash' 'exec /opt/harness/bun/bun /opt/harness/src/apps/cli/dist/index.js \"$@\"' > /opt/harness/bin/cline \\\n && chmod +x /opt/harness/bin/cline \\\n && mkdir -p /work /out\n\nENV CLINE_NO_AUTO_UPDATE=1 \\\n    CI=1\n",
+  "run_command": "set -o pipefail; mkdir -p /out/cline-data; export CLINE_SANDBOX=1 CLINE_SANDBOX_DATA_DIR=/out/cline-data CLINE_LOG_PATH=/out/cline-data/logs/cline.log; cline auth --provider openai-compatible --apikey \"$OPENAI_API_KEY\" --modelid \"$CLINE_MODEL_ID\" --baseurl \"$OPENAI_BASE_URL\" --data-dir /out/cline-data --cwd \"$PWD\" </dev/null; cline --yolo --data-dir /out/cline-data --cwd \"$PWD\" -P openai-compatible -m \"$CLINE_MODEL_ID\" -k \"$OPENAI_API_KEY\" --retries 5 -v \"$TASK\" </dev/null 2>&1 | tee /out/cline-run.log",
+  "check_command": "cline --version && cline auth --provider openai-compatible --apikey check --modelid gpt-4o --baseurl http://127.0.0.1:9/v1 --data-dir /tmp/cline-check </dev/null && test -f /tmp/cline-check/settings/providers.json",
+  "env": [
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "CLINE_MODEL_ID",
+      "value": "gpt-4o"
+    },
+    {
+      "name": "CLINE_NO_AUTO_UPDATE",
+      "value": "1"
+    },
+    {
+      "name": "CLINE_SANDBOX",
+      "value": "1"
+    },
+    {
+      "name": "CLINE_SANDBOX_DATA_DIR",
+      "value": "/out/cline-data"
+    },
+    {
+      "name": "CLINE_LOG_ENABLED",
+      "value": "1"
+    },
+    {
+      "name": "CLINE_LOG_LEVEL",
+      "value": "info"
+    },
+    {
+      "name": "CI",
+      "value": "1"
+    },
+    {
+      "name": "TERM",
+      "value": "dumb"
+    },
+    {
+      "name": "NO_COLOR",
+      "value": "1"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "Why this shape: Cline has no base-URL environment variable for its providers; the base URL lives in the provider settings file. `cline auth --provider openai-compatible ... --baseurl` is the documented non-interactive way to seed it (base URL is only accepted for openai-compatible / openai-native, and openai-native uses the Responses API, so openai-compatible chat completions is the right transport for the proxy). Because sandbox mode (--data-dir / CLINE_SANDBOX=1) points CLINE_PROVIDER_SETTINGS_PATH at <data-dir>/settings/providers.json for both the auth and the run, the same --data-dir is passed to both, and everything Cline persists (sessions, db, logs, teams, provider settings) lands under /out/cline-data. --yolo auto-approves all tools and, with sandbox, forces the in-process local backend, so no hub daemon is started and the process exits when the turn completes. Model ID is arbitrary for openai-compatible (unregistered IDs are accepted), so CLINE_MODEL_ID=gpt-4o is just a safe default; the proxy substitutes the real model. stdin is redirected from /dev/null so the CLI's piped-stdin detection does not try to read it. Telemetry is compiled out (no TELEMETRY_SERVICE_API_KEY at build time, OTEL disabled); the only non-proxy network attempt would be the best-effort model-catalog refresh, which is caught and logged. Build note: `bun install` runs lifecycle scripts only for trustedDependencies (better-sqlite3 uses prebuilt binaries; grpc-tools is for the VS Code workspace) and applies the repo's patches/; the CLI build also builds the hub webview via vite. The wrapper /opt/harness/bin/cline simply execs Bun on the built bundle; the harness source is unchanged. Previous attempt failed only because analysis exhausted its turn budget; this recipe is complete."
+}

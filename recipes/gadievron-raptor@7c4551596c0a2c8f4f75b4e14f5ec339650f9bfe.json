@@ -1,0 +1,52 @@
+{
+  "summary": "RAPTOR is an autonomous offensive/defensive security-research harness that is \"Based on Claude Code\": bin/raptor is a hardened bash launcher that ultimately execs the Anthropic `claude` CLI (pinned in the repo's devcontainer to @anthropic-ai/claude-code@2.1.269), and the startup banner confirms Claude Code is RAPTOR's model transport (\"llm: no external LLM configured / claude code \u2713\"). RAPTOR's own launcher only starts an INTERACTIVE session (it forces the `/raptor` initial prompt and never exits on its own), so it is unsuitable for one-shot non-interactive execution; the harness's real model-calling engine is the `claude` CLI itself. We therefore run Claude Code in headless mode (`claude -p \"$TASK\"`), which reads/edits files in the current working directory, makes all model calls to the Anthropic Messages API at $ANTHROPIC_BASE_URL/v1/messages, and exits when the task is done. The overlay installs Node + Claude Code self-contained under /opt/harness (never touching the base image's toolchain) and copies the RAPTOR sources alongside it.",
+  "base_image": "buildpack-deps:jammy",
+  "dockerfile": "ARG BASE=buildpack-deps:jammy\nFROM ${BASE}\n\n# The harness runtime is Claude Code (Node). Install it self-contained under\n# /opt/harness so we never rely on or modify the base image's node/python.\nENV DEBIAN_FRONTEND=noninteractive\n\nRUN apt-get update \\\n    && apt-get install -y --no-install-recommends \\\n         ca-certificates curl xz-utils git \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Node.js (latest v22 LTS) unpacked into /opt/harness/node. The exact patch is\n# resolved from nodejs.org at build time so we never guess a nonexistent version.\nRUN set -eux; \\\n    arch=\"$(dpkg --print-architecture)\"; \\\n    case \"$arch\" in \\\n      amd64) narch=x64 ;; \\\n      arm64) narch=arm64 ;; \\\n      *) echo \"unsupported arch: $arch\" >&2; exit 1 ;; \\\n    esac; \\\n    ver=\"$(curl -fsSL https://nodejs.org/dist/latest-v22.x/ \\\n           | grep -oE \"node-v22\\.[0-9]+\\.[0-9]+-linux-${narch}\\.tar\\.xz\" \\\n           | head -n1)\"; \\\n    test -n \"$ver\"; \\\n    mkdir -p /opt/harness/node; \\\n    curl -fsSL \"https://nodejs.org/dist/latest-v22.x/${ver}\" -o /tmp/node.tar.xz; \\\n    tar -xJf /tmp/node.tar.xz -C /opt/harness/node --strip-components=1; \\\n    rm /tmp/node.tar.xz\n\nENV PATH=/opt/harness/node/bin:$PATH\n\n# Claude Code CLI \u2014 the harness engine, pinned to the version RAPTOR itself uses.\n# npm's global prefix here is /opt/harness/node, so the `claude` bin lands on PATH.\nRUN npm install -g @anthropic-ai/claude-code@2.1.269 \\\n    && npm cache clean --force\n\n# RAPTOR sources (the harness config/skills/agents). Build context is the repo root.\nCOPY . /opt/harness/src\n\n# Relocate Claude Code state under /opt/harness and pre-accept first-run prompts,\n# so a headless, non-tty run never blocks on onboarding or the bypass-mode dialog.\nENV CLAUDE_CONFIG_DIR=/opt/harness/claude\nRUN mkdir -p /opt/harness/claude \\\n    && printf '%s\\n' '{\"hasCompletedOnboarding\":true,\"bypassPermissionsModeAccepted\":true}' \\\n       > /opt/harness/claude/.claude.json\n\n# Keep the harness off the network except for the proxy: no updater, telemetry,\n# or error reporting.\nENV DISABLE_AUTOUPDATER=1 \\\n    DISABLE_TELEMETRY=1 \\\n    DISABLE_ERROR_REPORTING=1 \\\n    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+  "run_command": "set -euo pipefail\nmkdir -p /out\nclaude -p \"$TASK\" \\\n  --model \"$ANTHROPIC_MODEL\" \\\n  --dangerously-skip-permissions \\\n  --verbose \\\n  --output-format stream-json \\\n  2>/out/claude.stderr | tee /out/trajectory.jsonl",
+  "check_command": "claude --help",
+  "env": [
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "ANTHROPIC_MODEL",
+      "value": "claude-sonnet-4-5"
+    },
+    {
+      "name": "CLAUDE_CODE_SUBAGENT_MODEL",
+      "value": "claude-sonnet-4-5"
+    },
+    {
+      "name": "CLAUDE_CONFIG_DIR",
+      "value": "/opt/harness/claude"
+    },
+    {
+      "name": "IS_SANDBOX",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_AUTOUPDATER",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_TELEMETRY",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_ERROR_REPORTING",
+      "value": "1"
+    },
+    {
+      "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+      "value": "1"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Entrypoint choice: RAPTOR's own launcher (bin/raptor) is interactive-only \u2014 it forces the `/raptor` slash-command as the initial prompt, seeds a session ledger, and never terminates non-interactively \u2014 so it cannot drive a single headless task. The repo's devcontainer confirms the underlying engine is @anthropic-ai/claude-code@2.1.269 and the runtime banner shows Claude Code is RAPTOR's LLM transport, so the faithful non-interactive entrypoint is the `claude` CLI in `-p` (print/headless) mode. It reads and edits files in cwd (the task dir), so the run command does NOT cd into the harness source.\n\nProxy/API: Claude Code posts to `${ANTHROPIC_BASE_URL}/v1/messages`, so ANTHROPIC_BASE_URL is set to $PROXY_URL (no /v1 suffix \u2014 the SDK appends it) and api_style is anthropic. Any key string works (ANTHROPIC_API_KEY=proxy). The model name is replaced on the far side; claude-sonnet-4-5 is a valid Claude id the CLI accepts locally and is also applied to subagents via CLAUDE_CODE_SUBAGENT_MODEL.\n\nPermissions/root: `--dangerously-skip-permissions` grants all tool use non-interactively; IS_SANDBOX=1 lets it run as root (the flag's root guard is bypassed inside a sandbox). The pre-seeded /opt/harness/claude/.claude.json also marks onboarding + bypass-mode accepted as belt-and-suspenders.\n\nTrajectory: stream-json events are tee'd to /out/trajectory.jsonl and stderr to /out/claude.stderr (mount /out from the host).\n\nSelf-containment: Node 22 LTS + Claude Code live entirely under /opt/harness; PATH prepends /opt/harness/node/bin. The base image's python/node/toolchain (which task tests depend on) are untouched. The RAPTOR sources are copied to /opt/harness/src for completeness but are not required for generic task execution; python3 is not installed because RAPTOR's python subcommands (scan/agentic/etc.) are only invoked if a task explicitly drives them, and installing a harness python on PATH would risk shadowing the base image's python the tests rely on.\n\nNot baked in: no secrets, and the harness is never run during build."
+}

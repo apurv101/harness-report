@@ -1,0 +1,72 @@
+{
+  "summary": "Wuphf (branded \"gawkbot\") is a Go multi-bot \"office\" orchestrator: the CLI at cmd/wuphf boots a broker (HTTP, port 7890) plus a web server (port 7891), and bots run one headless turn per incoming message. There is no one-shot coding-agent subcommand (--cmd only accepts slash commands; plain prose is rejected), so the recipe boots the office headlessly (--provider claude-code --unsafe --no-open) against a pre-onboarded runtime home, POSTs one DM to the lead bot \"cos\" via the broker's /messages API with the task text and the absolute task directory, and waits on the bot's /agent-stream SSE for the terminal \"idle\" headless_event before shutting down. With the claude-code provider each bot turn is a fresh `claude --print - --output-format stream-json --permission-mode bypassPermissions --dangerously-skip-permissions --mcp-config ...` subprocess (internal/team/headless_claude.go) that inherits the environment, so model traffic is routed by Claude Code's ANTHROPIC_BASE_URL/ANTHROPIC_API_KEY to the proxy using the Anthropic messages API. The harness hardcodes --model claude-sonnet-4-6 and --max-turns 30 for the lead bot.",
+  "base_image": "buildpack-deps:jammy",
+  "dockerfile": "ARG BASE=buildpack-deps:jammy\nFROM ${BASE}\n\nARG GO_VERSION=1.26.6\nARG NODE_VERSION=22.23.3\nARG CLAUDE_CODE_VERSION=2.1.281\nENV DEBIAN_FRONTEND=noninteractive\n\n# Only what the harness needs at build/run time; never touch the base image's python/node.\nRUN apt-get update \\\n    && apt-get install -y --no-install-recommends ca-certificates curl git jq xz-utils procps \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Self-contained runtimes under /opt/harness: a private Node (for the Claude Code CLI that\n# wuphf shells out to per bot turn) and a private Go toolchain matching go.mod's toolchain line.\nRUN set -eux; \\\n    arch=\"$(dpkg --print-architecture)\"; \\\n    case \"$arch\" in \\\n      amd64) goarch=amd64; nodearch=x64 ;; \\\n      arm64) goarch=arm64; nodearch=arm64 ;; \\\n      *) echo \"unsupported architecture: $arch\" >&2; exit 1 ;; \\\n    esac; \\\n    mkdir -p /opt/harness/bin /opt/harness/node; \\\n    curl -fsSL \"https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${nodearch}.tar.xz\" \\\n      | tar -xJ -C /opt/harness/node --strip-components=1; \\\n    curl -fsSL \"https://go.dev/dl/go${GO_VERSION}.linux-${goarch}.tar.gz\" \\\n      | tar -xz -C /opt/harness\n\nENV PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH\n\n# Claude Code CLI is the per-turn runtime for the default claude-code provider (PreflightWeb requires it on PATH).\nRUN npm_config_update_notifier=false npm install -g --no-fund --no-audit \"@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}\"\n\n# Build the harness's own CLI from the repo source (pure Go, CGO off, as in .goreleaser.yml).\n# web/dist/.gitkeep is tracked so the go:embed compiles without a web build; the broker API does not need the UI bundle.\nCOPY . /opt/harness/src\nRUN set -eux; \\\n    cd /opt/harness/src; \\\n    CGO_ENABLED=0 GOTOOLCHAIN=auto GOFLAGS=-trimpath \\\n    GOPATH=/opt/harness/gopath GOMODCACHE=/opt/harness/gopath/pkg/mod GOCACHE=/opt/harness/gocache \\\n    /opt/harness/go/bin/go build -ldflags=\"-s -w\" -o /opt/harness/bin/gawkbot ./cmd/wuphf; \\\n    rm -rf /opt/harness/gopath /opt/harness/gocache /opt/harness/go\n\nRUN mkdir -p /out /work\n",
+  "run_command": "set -uo pipefail\nOUT=/out; mkdir -p \"$OUT\"\nexport WUPHF_RUNTIME_HOME=\"${WUPHF_RUNTIME_HOME:-/tmp/wuphf-home}\"\nexport WUPHF_BROKER_TOKEN_FILE=\"${WUPHF_BROKER_TOKEN_FILE:-/tmp/wuphf-broker-token}\"\nBROKER=http://127.0.0.1:7890\nmkdir -p \"$WUPHF_RUNTIME_HOME/.wuphf\"\nprintf '{\"version\":1,\"completed_at\":\"2026-01-01T00:00:00Z\",\"company_name\":\"harness\"}\\n' > \"$WUPHF_RUNTIME_HOME/.wuphf/onboarded.json\"\nrm -f \"$WUPHF_BROKER_TOKEN_FILE\"\ngawkbot --provider claude-code --no-open --unsafe --memory-backend none --broker-port 7890 --web-port 7891 </dev/null >\"$OUT/gawkbot.log\" 2>&1 &\nOFFICE=$!\ncleanup() { kill -TERM \"${SSE:-}\" \"$OFFICE\" 2>/dev/null; wait \"$OFFICE\" 2>/dev/null; cp -r \"$WUPHF_RUNTIME_HOME/.wuphf/office\" \"$OUT/office\" 2>/dev/null; cp -r \"$WUPHF_RUNTIME_HOME/.wuphf/logs\" \"$OUT/logs\" 2>/dev/null; cp -r \"$WUPHF_RUNTIME_HOME/.wuphf/agent-scratch\" \"$OUT/agent-scratch\" 2>/dev/null; return 0; }\ntrap cleanup EXIT\nfor i in $(seq 1 90); do\n  if curl -sf \"$BROKER/health\" >/dev/null 2>&1 && [ -s \"$WUPHF_BROKER_TOKEN_FILE\" ]; then break; fi\n  kill -0 \"$OFFICE\" 2>/dev/null || { echo \"harness: gawkbot exited before the broker came up (see $OUT/gawkbot.log)\" >&2; exit 1; }\n  sleep 1\ndone\nTOKEN=\"$(cat \"$WUPHF_BROKER_TOKEN_FILE\" 2>/dev/null)\"\n[ -n \"$TOKEN\" ] || { echo \"harness: broker never became healthy\" >&2; exit 1; }\ncurl -sN \"$BROKER/agent-stream/cos?token=$TOKEN\" >\"$OUT/cos-stream.log\" 2>/dev/null &\nSSE=$!\nsleep 1\nPROMPT=\"$(printf 'You are running headless inside an automated evaluation. Do all work directly in the directory %s, using absolute paths (never your scratch directory). Do not ask questions, do not wait for approval, and do not delegate to other bots; complete the task yourself with your tools, then reply with a brief summary of what you changed.\\n\\nTask:\\n%s' \"$PWD\" \"$TASK\")\"\njq -cn --arg c \"$PROMPT\" '{from:\"you\",channel:\"cos__human\",content:$c,tagged:[\"cos\"]}' \\\n  | curl -sf -X POST \"$BROKER/messages\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' --data-binary @- >\"$OUT/post-message.json\" \\\n  || { echo \"harness: posting the task message failed\" >&2; exit 1; }\nDEADLINE=$(( $(date +%s) + ${WUPHF_HARNESS_TIMEOUT_SECONDS:-2700} ))\nSTATUS=timeout\nwhile [ \"$(date +%s)\" -lt \"$DEADLINE\" ]; do\n  if grep -q '\"kind\":\"headless_event\",\"type\":\"idle\"' \"$OUT/cos-stream.log\" 2>/dev/null; then STATUS=idle; break; fi\n  if grep -q '\"kind\":\"headless_event\",\"type\":\"error\"' \"$OUT/cos-stream.log\" 2>/dev/null; then STATUS=error; break; fi\n  kill -0 \"$OFFICE\" 2>/dev/null || { STATUS=died; break; }\n  sleep 2\ndone\necho \"harness: cos turn finished with status=$STATUS\"\n[ \"$STATUS\" = idle ]",
+  "check_command": "gawkbot --version && gawkbot --help >/dev/null 2>&1 && claude --version && jq --version",
+  "env": [
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "WUPHF_LLM_PROVIDER",
+      "value": "claude-code"
+    },
+    {
+      "name": "WUPHF_RUNTIME_HOME",
+      "value": "/tmp/wuphf-home"
+    },
+    {
+      "name": "WUPHF_BROKER_TOKEN_FILE",
+      "value": "/tmp/wuphf-broker-token"
+    },
+    {
+      "name": "WUPHF_MEMORY_BACKEND",
+      "value": "none"
+    },
+    {
+      "name": "WUPHF_UNSAFE",
+      "value": "1"
+    },
+    {
+      "name": "WUPHF_OFFICE_TIMEOUT",
+      "value": "40m"
+    },
+    {
+      "name": "WUPHF_TURN_TIMEOUT",
+      "value": "40m"
+    },
+    {
+      "name": "WUPHF_SKIP_VERSION_CHECK",
+      "value": "1"
+    },
+    {
+      "name": "IS_SANDBOX",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_AUTOUPDATER",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_TELEMETRY",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_ERROR_REPORTING",
+      "value": "1"
+    },
+    {
+      "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+      "value": "1"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Verified against the source on 2026-09-23. Key facts: (1) No one-shot task CLI exists; `--cmd` only dispatches slash commands (internal/commands/dispatch.go rejects prose), so the run command drives the office over its broker HTTP API exactly as scripts/benchmark.sh and scripts/smoke-broker-restart.sh do. (2) #general is disabled by default (internal/channel/general.go generalEnabled=false), so the message is posted to the human<->cos DM slug \"cos__human\" (channel.DirectSlug(\"human\",\"cos\")), which the broker auto-creates. (3) Headless turns never run in the broker cwd; they run in <runtime_home>/.wuphf/agent-scratch/<slug> (internal/team/headless_workspace.go), so the prompt names the absolute task directory. (4) The lead bot is launched with hardcoded `--model claude-sonnet-4-6` and `--max-turns 30` (internal/team/headless_claude.go); the proxy swaps the model name but the 30-turn cap is a real ceiling; per-turn wall clock is WUPHF_OFFICE_TIMEOUT/WUPHF_TURN_TIMEOUT (Go durations). (5) `--unsafe` makes bots run with `--permission-mode bypassPermissions --dangerously-skip-permissions`; Claude Code refuses that as root unless IS_SANDBOX=1, hence that env var. (6) The claude subprocess inherits the full environment (gitexec.CleanEnv strips only GIT_* vars), so ANTHROPIC_BASE_URL/ANTHROPIC_API_KEY reach it. (7) Onboarding is skipped by seeding <runtime_home>/.wuphf/onboarded.json with completed_at (internal/onboarding/state.go Onboarded()); PreflightWeb then only requires `claude` on PATH. (8) The broker writes its bearer token to WUPHF_BROKER_TOKEN_FILE (internal/team/broker.go Start); /agent-stream/<slug>?token= streams `data: {\"kind\":\"headless_event\",\"type\":\"idle\"|\"error\",...}` at turn end (headless_event.go emitHeadlessTerminal). (9) The bun sidecar in agent/ is optional: missing bun is logged once and ignored (bot_service_supervisor.go). (10) web/dist/.gitkeep is tracked so the go:embed compiles without building the web UI; the web port serves a fallback page but the broker API is unaffected. (11) Build unverified locally (no Go on this Mac); the Go 1.26.6, Node 22.23.3, and @anthropic-ai/claude-code@2.1.281 downloads were confirmed reachable. Exit status: 0 when cos emits idle, 1 on error/timeout/early exit; gawkbot.log, cos-stream.log, post-message.json, office receipts, and scratch dirs are copied to /out."
+}

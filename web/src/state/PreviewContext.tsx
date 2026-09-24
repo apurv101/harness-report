@@ -2,13 +2,14 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { readPreview, writePreview, type PreviewState } from '../lib/preview'
 import { useSession } from './SessionContext'
 
-/** The onboarding flow's own state: simulated sign-in, chosen repository, first-task result. */
+/** The onboarding flow's own state: sign-in (real or simulated), chosen repository, first-task result. */
 interface PreviewValue extends PreviewState {
   /** Signed in for real, or simulated far enough to continue the flow. */
   signedIn: boolean
   connect: () => void
   selectRepo: (repo: string) => void
   setResult: (result: PreviewState['result']) => void
+  setEval: (evalId: string | null) => void
 }
 
 const PreviewContext = createContext<PreviewValue | null>(null)
@@ -29,8 +30,9 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
     ...state,
     signedIn: session?.auth ? !!session.user : !!state.connected,
     connect: () => update({ connected: true }),
-    selectRepo: (repo: string) => update({ repo, result: null }),
+    selectRepo: (repo: string) => update({ repo, result: null, evalId: null }),
     setResult: (result: PreviewState['result']) => update({ result }),
+    setEval: (evalId: string | null) => update({ evalId }),
   }), [state, session, update])
 
   return <PreviewContext.Provider value={value}>{children}</PreviewContext.Provider>

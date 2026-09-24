@@ -1,0 +1,64 @@
+{
+  "summary": "Letta Code (@letta-ai/letta-code) is a TypeScript/Bun-built, Node-run coding-agent CLI whose entrypoint is the bundled letta.js (built from src/standalone-entry.ts by build.js). It normally talks to Letta Cloud, but it ships an in-process \"local backend\" (LETTA_LOCAL_BACKEND_EXPERIMENTAL=1 / --backend local) that drives LLM providers directly through the @earendil-works/pi-ai library. Provider connections for the local backend are stored in <LETTA_LOCAL_BACKEND_DIR>/providers/auth.json via `letta --backend local connect <provider> --api-key ... --base-url ...`; for the built-in \"anthropic\" provider the stored base_url is passed verbatim as baseURL to the Anthropic SDK, so the harness POSTs to $PROXY_URL/v1/messages?beta=true (streaming, with tool definitions). The pi-ai \"openai\" provider uses the Responses API, so the Anthropic route is used. One task runs non-interactively with `letta -p --new-agent --yolo --model anthropic/<claude id> --output-format stream-json \"$TASK\"`, which creates a fresh local agent, auto-approves tools, streams JSONL events to stdout and exits; the local backend also persists the full conversation transcript (messages.jsonl) under LETTA_LOCAL_BACKEND_DIR, which the recipe points at /out. Verified in Docker on both python:3.12-slim-bookworm and buildpack-deps:jammy against a mock Anthropic server.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\n\n# Letta Code overlay: self-contained Node 22 + Bun toolchain under /opt/harness,\n# source copied to /opt/harness/src and bundled there with the repo's own build.\nARG NODE_VERSION=22.19.0\nARG BUN_VERSION=1.3.14\nENV DEBIAN_FRONTEND=noninteractive\n\n# make/g++ are only needed when node-pty has no prebuild for the arch (e.g. arm64);\n# python3 (needed by node-gyp in that case) comes from the base image.\nRUN set -eux; \\\n    apt-get update; \\\n    apt-get install -y --no-install-recommends \\\n      ca-certificates curl git xz-utils unzip ripgrep procps make g++; \\\n    rm -rf /var/lib/apt/lists/*\n\nRUN set -eux; \\\n    arch=\"$(dpkg --print-architecture)\"; \\\n    case \"$arch\" in \\\n      amd64) node_arch=x64; bun_arch=x64 ;; \\\n      arm64) node_arch=arm64; bun_arch=aarch64 ;; \\\n      *) echo \"unsupported architecture: $arch\" >&2; exit 1 ;; \\\n    esac; \\\n    mkdir -p /opt/harness/node /opt/harness/bun /opt/harness/bin; \\\n    curl -fsSL \"https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz\" \\\n      | tar -xJ -C /opt/harness/node --strip-components=1; \\\n    curl -fsSL -o /tmp/bun.zip \"https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${bun_arch}.zip\"; \\\n    unzip -q /tmp/bun.zip -d /tmp/bun; \\\n    mv \"/tmp/bun/bun-linux-${bun_arch}/bun\" /opt/harness/bun/bun; \\\n    chmod +x /opt/harness/bun/bun; \\\n    ln -s bun /opt/harness/bun/bunx; \\\n    rm -rf /tmp/bun /tmp/bun.zip\n\nENV PATH=/opt/harness/bin:/opt/harness/node/bin:/opt/harness/bun:$PATH\n\nCOPY . /opt/harness/src\n\n# bun install applies the vendored Ink patches (postinstall); `bun run build`\n# bundles src/standalone-entry.ts -> /opt/harness/src/letta.js and copies bundled skills.\nRUN set -eux; \\\n    cd /opt/harness/src; \\\n    export CI=true HOME=/tmp/harness-build-home; \\\n    bun install --frozen-lockfile; \\\n    bun run build; \\\n    printf '#!/bin/sh\\nexec /opt/harness/node/bin/node /opt/harness/src/letta.js \"$@\"\\n' > /opt/harness/bin/letta; \\\n    chmod +x /opt/harness/bin/letta; \\\n    rm -rf /tmp/harness-build-home\n\n# Non-interactive, offline-friendly defaults for the local (pi-ai) backend.\nENV LETTA_LOCAL_BACKEND_EXPERIMENTAL=1 \\\n    DISABLE_AUTOUPDATER=1 \\\n    DO_NOT_TRACK=1 \\\n    LETTA_CODE_TELEM=0 \\\n    LETTA_CODE_OFFLINE=1 \\\n    LETTA_SKIP_KEYCHAIN_CHECK=1 \\\n    LETTA_FS_SANDBOX=0 \\\n    LETTA_DISABLE_MODS=1 \\\n    CI=true\n",
+  "run_command": "set -o pipefail; mkdir -p /out; letta --backend local connect anthropic --api-key proxy --base-url \"$PROXY_URL\" >/dev/null && letta --backend local -p --new-agent --yolo --model \"$LETTA_HARNESS_MODEL\" --output-format stream-json \"$TASK\" | tee /out/letta-stream.jsonl",
+  "check_command": "letta --version",
+  "env": [
+    {
+      "name": "LETTA_LOCAL_BACKEND_EXPERIMENTAL",
+      "value": "1"
+    },
+    {
+      "name": "LETTA_LOCAL_BACKEND_DIR",
+      "value": "/out/letta-local-backend"
+    },
+    {
+      "name": "LETTA_HARNESS_MODEL",
+      "value": "anthropic/claude-sonnet-4-5"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "DISABLE_AUTOUPDATER",
+      "value": "1"
+    },
+    {
+      "name": "DO_NOT_TRACK",
+      "value": "1"
+    },
+    {
+      "name": "LETTA_CODE_TELEM",
+      "value": "0"
+    },
+    {
+      "name": "LETTA_CODE_OFFLINE",
+      "value": "1"
+    },
+    {
+      "name": "LETTA_SKIP_KEYCHAIN_CHECK",
+      "value": "1"
+    },
+    {
+      "name": "LETTA_FS_SANDBOX",
+      "value": "0"
+    },
+    {
+      "name": "LETTA_DISABLE_MODS",
+      "value": "1"
+    },
+    {
+      "name": "LETTA_DISABLE_CRON_SCHEDULER",
+      "value": "1"
+    },
+    {
+      "name": "CI",
+      "value": "true"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Routing: the harness has no ANTHROPIC_BASE_URL hook (neither letta-code nor pi-ai read it), so the proxy URL is stored per run with `letta --backend local connect anthropic --api-key proxy --base-url \"$PROXY_URL\"`; that record goes to $LETTA_LOCAL_BACKEND_DIR/providers/auth.json and is passed as the Anthropic SDK baseURL, so requests hit $PROXY_URL/v1/messages?beta=true (beta messages endpoint, streaming, anthropic-beta headers, tool definitions). The proxy must tolerate the ?beta=true query string. Model: LETTA_HARNESS_MODEL is a recipe-only variable consumed by run_command; the value must be an `anthropic/<id>` handle present in pi-ai 0.87.1's catalog (claude-sonnet-4-5, claude-opus-4-5/4-6/4-7/4-8, claude-haiku-4-5, claude-fable-5/5-1, claude-opus-5/5-5, claude-sonnet-4-6/5). The OpenAI provider is avoided because pi-ai's \"openai\" provider speaks the Responses API, not chat completions. Outputs: stdout is stream-json (init/message/result events) and is tee'd to /out/letta-stream.jsonl; the local backend writes the full conversation transcript to /out/letta-local-backend/conversations/*/messages.jsonl plus agent/memfs state. --new-agent creates a fresh local agent per run with memfs (a local git repo under LETTA_LOCAL_BACKEND_DIR; git identity is set by the harness); --yolo sets permission mode \"unrestricted\" so Bash/Edit/Write run without prompts; stdin is not read because the prompt is positional. Build notes: node-pty ships a linux-x64 prebuild; on arm64 it compiles with node-gyp (hence make/g++, python3 from the base image); the bun zip lacks a bunx symlink, which build.js needs for `bunx tsc`. Verified end to end in Docker on both python:3.12-slim-bookworm and buildpack-deps:jammy against a mock Anthropic streaming server: `letta --version` -> 0.32.19, connect exit 0, headless run exit 0 with the mock's text returned as the result."
+}

@@ -1,0 +1,84 @@
+{
+  "summary": "Kilo CLI (packages/opencode, a fork of OpenCode; core services in packages/core) is a Bun/TypeScript coding agent. Its entrypoint is packages/opencode/src/index.ts (yargs CLI, script name `kilo`); the non-interactive one-shot mode is `kilo run --format json --auto --model provider/model \"<prompt>\"`, which boots the in-process HTTP server, creates a session rooted at the cwd, streams one JSON event per line, auto-approves permission requests, and exits. Model calls go through the Vercel AI SDK; providers come from JSON config (KILO_CONFIG_CONTENT holds inline config), and a custom provider with npm \"@ai-sdk/openai-compatible\" plus options.baseURL sends OpenAI chat-completions requests (streaming + tool calls) to the proxy, exactly the way the repo's own CLI subprocess tests do (test/lib/test-provider.ts, test/lib/cli-process.ts). The overlay installs Bun 1.3.14 under /opt/harness/bun, copies the repo to /opt/harness/src, runs `bun install --frozen-lockfile`, and writes a /opt/harness/bin/kilo shim (symlinked into /usr/local/bin and added via profile.d so `bash -lc` keeps it on PATH) that launches src/index.ts with the same bun flags as the repo's dev/test tooling, with the @opentui/solid preload resolved to an absolute path at build time and offline-safe KILO_DISABLE_* defaults exported so the CLI never fetches models.dev, plugins, or updates.",
+  "base_image": "debian:bookworm-slim",
+  "dockerfile": "ARG BASE=debian:bookworm-slim\nFROM ${BASE}\n\nARG BUN_VERSION=1.3.14\nENV DEBIAN_FRONTEND=noninteractive\n\n# Only what a bare Debian/Ubuntu userland may be missing; never touch the base's python/node.\nRUN apt-get update \\\n && apt-get install -y --no-install-recommends ca-certificates curl git unzip bash \\\n && rm -rf /var/lib/apt/lists/*\n\n# Self-contained Bun runtime under /opt/harness (the CLI is a Bun/TypeScript program).\nRUN set -eux; \\\n    arch=\"$(uname -m)\"; \\\n    case \"$arch\" in x86_64) a=x64 ;; aarch64|arm64) a=aarch64 ;; *) echo \"unsupported arch: $arch\"; exit 1 ;; esac; \\\n    mkdir -p /opt/harness/bun/bin /opt/harness/bin /tmp/bun; \\\n    curl -fsSL \"https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-${a}.zip\" -o /tmp/bun/bun.zip; \\\n    unzip -q /tmp/bun/bun.zip -d /tmp/bun; \\\n    mv \"/tmp/bun/bun-linux-${a}/bun\" /opt/harness/bun/bin/bun; \\\n    chmod +x /opt/harness/bun/bin/bun; \\\n    rm -rf /tmp/bun; \\\n    /opt/harness/bun/bin/bun --version\n\nENV BUN_INSTALL=/opt/harness/bun\nENV PATH=/opt/harness/bin:/opt/harness/bun/bin:$PATH\n\n# Harness source (build context = repo root) and its locked dependencies.\nCOPY . /opt/harness/src\nRUN cd /opt/harness/src && HUSKY=0 bun install --frozen-lockfile\n\n# `kilo` entrypoint: the CLI's own src/index.ts, launched the way the repo's dev/test tooling launches it\n# (bun run --conditions=browser --preload=@opentui/solid/preload src/index.ts). The preload is resolved to an\n# absolute path at build time because bun resolves bare --preload specifiers relative to the cwd, and the run\n# happens in the task directory. The shim also exports offline-safe defaults (no models.dev fetch, no plugin\n# install, no autoupdate/share/telemetry) so the CLI works without network even if the caller sets no env.\n# Symlinks + profile.d keep it reachable under `bash -lc` (Debian/Ubuntu /etc/profile resets PATH).\nRUN set -eux; \\\n    cd /opt/harness/src/packages/opencode; \\\n    preload=\"$(bun -e 'console.log(Bun.resolveSync(\"@opentui/solid/preload\", process.cwd()))')\"; \\\n    test -f \"$preload\"; \\\n    printf '%s\\n' '#!/usr/bin/env bash' \\\n      'export KILO_DISABLE_MODELS_FETCH=\"${KILO_DISABLE_MODELS_FETCH:-1}\"' \\\n      'export KILO_PURE=\"${KILO_PURE:-1}\"' \\\n      'export KILO_DISABLE_DEFAULT_PLUGINS=\"${KILO_DISABLE_DEFAULT_PLUGINS:-1}\"' \\\n      'export KILO_DISABLE_AUTOUPDATE=\"${KILO_DISABLE_AUTOUPDATE:-1}\"' \\\n      'export KILO_DISABLE_SHARE=\"${KILO_DISABLE_SHARE:-1}\"' \\\n      'export KILO_DISABLE_SESSION_INGEST=\"${KILO_DISABLE_SESSION_INGEST:-1}\"' \\\n      'export KILO_DISABLE_PRESENCE=\"${KILO_DISABLE_PRESENCE:-1}\"' \\\n      'export KILO_DISABLE_LSP_DOWNLOAD=\"${KILO_DISABLE_LSP_DOWNLOAD:-1}\"' \\\n      'export KILO_DISABLE_CODEBASE_INDEXING=\"${KILO_DISABLE_CODEBASE_INDEXING:-1}\"' \\\n      'export KILO_TELEMETRY_LEVEL=\"${KILO_TELEMETRY_LEVEL:-off}\"' \\\n      'export DO_NOT_TRACK=\"${DO_NOT_TRACK:-1}\"' \\\n      \"exec /opt/harness/bun/bin/bun run --conditions=browser --preload=\\\"$preload\\\" /opt/harness/src/packages/opencode/src/index.ts \\\"\\$@\\\"\" \\\n      > /opt/harness/bin/kilo; \\\n    chmod +x /opt/harness/bin/kilo; \\\n    ln -sf /opt/harness/bin/kilo /usr/local/bin/kilo; \\\n    ln -sf /opt/harness/bun/bin/bun /usr/local/bin/bun; \\\n    printf '%s\\n' 'export PATH=/opt/harness/bin:/opt/harness/bun/bin:$PATH' > /etc/profile.d/kilo-harness.sh; \\\n    cat /opt/harness/bin/kilo\n",
+  "run_command": "set -o pipefail; mkdir -p /out; export XDG_DATA_HOME=/out/xdg/data XDG_STATE_HOME=/out/xdg/state XDG_CACHE_HOME=/out/xdg/cache; export KILO_CONFIG_CONTENT=\"$(printf '{\"enabled_providers\":[\"proxy\"],\"provider\":{\"proxy\":{\"name\":\"Proxy\",\"id\":\"proxy\",\"env\":[],\"npm\":\"@ai-sdk/openai-compatible\",\"options\":{\"apiKey\":\"proxy\",\"baseURL\":\"%s/v1\"},\"models\":{\"gpt-4o\":{\"id\":\"gpt-4o\",\"name\":\"gpt-4o\",\"tool_call\":true,\"attachment\":false,\"reasoning\":false,\"temperature\":true,\"limit\":{\"context\":200000,\"output\":32000},\"cost\":{\"input\":0,\"output\":0},\"options\":{}}}}},\"model\":\"proxy/gpt-4o\",\"small_model\":\"proxy/gpt-4o\",\"share\":\"disabled\",\"lsp\":false,\"formatter\":false}' \"$PROXY_URL\")\"; kilo run --format json --auto --dangerously-skip-permissions --model proxy/gpt-4o --title task -- \"$TASK\" | tee /out/kilo-run.jsonl",
+  "check_command": "kilo --version && kilo --help >/dev/null && KILO_DISABLE_MODELS_FETCH=1 KILO_PURE=1 KILO_AUTH_CONTENT='{}' KILO_CONFIG_CONTENT='{\"enabled_providers\":[\"proxy\"],\"provider\":{\"proxy\":{\"name\":\"Proxy\",\"id\":\"proxy\",\"env\":[],\"npm\":\"@ai-sdk/openai-compatible\",\"options\":{\"apiKey\":\"proxy\",\"baseURL\":\"http://127.0.0.1:1/v1\"},\"models\":{\"gpt-4o\":{\"id\":\"gpt-4o\",\"name\":\"gpt-4o\",\"tool_call\":true,\"limit\":{\"context\":200000,\"output\":32000},\"cost\":{\"input\":0,\"output\":0}}}}}}' kilo models | grep -q '^proxy/gpt-4o'",
+  "env": [
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "KILO_CLIENT",
+      "value": "cli"
+    },
+    {
+      "name": "KILO_PURE",
+      "value": "1"
+    },
+    {
+      "name": "KILO_DISABLE_DEFAULT_PLUGINS",
+      "value": "1"
+    },
+    {
+      "name": "KILO_DISABLE_AUTOUPDATE",
+      "value": "1"
+    },
+    {
+      "name": "KILO_DISABLE_MODELS_FETCH",
+      "value": "1"
+    },
+    {
+      "name": "KILO_DISABLE_SHARE",
+      "value": "1"
+    },
+    {
+      "name": "KILO_DISABLE_SESSION_INGEST",
+      "value": "1"
+    },
+    {
+      "name": "KILO_DISABLE_PRESENCE",
+      "value": "1"
+    },
+    {
+      "name": "KILO_DISABLE_LSP_DOWNLOAD",
+      "value": "1"
+    },
+    {
+      "name": "KILO_DISABLE_CODEBASE_INDEXING",
+      "value": "1"
+    },
+    {
+      "name": "KILO_NO_DAEMON",
+      "value": "1"
+    },
+    {
+      "name": "KILO_TELEMETRY_LEVEL",
+      "value": "off"
+    },
+    {
+      "name": "KILO_AUTH_CONTENT",
+      "value": "{}"
+    },
+    {
+      "name": "DO_NOT_TRACK",
+      "value": "1"
+    },
+    {
+      "name": "CI",
+      "value": "1"
+    },
+    {
+      "name": "HUSKY",
+      "value": "0"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "Why the previous recipe failed: (1) the check command was executed without the recipe's env list, so KILO_DISABLE_MODELS_FETCH was unset and `kilo models` (which loads the provider catalog via packages/core/src/models-dev.ts) tried to GET https://models.dev/api.json offline and died with \"Transport error\"; yargs then printed help to stderr, which is the help text in the error output. (2) The shim hardcoded packages/opencode/node_modules/@opentui/solid/scripts/preload.js, but the lockfile now uses bun's isolated store (node_modules/.bun/@opentui+solid@.../...), so that path no longer exists. Fixes: the check command sets KILO_DISABLE_MODELS_FETCH/KILO_PURE/KILO_AUTH_CONTENT inline, the /opt/harness/bin/kilo shim exports the same offline-safe defaults (overridable) so the CLI never needs the env list to start, and the preload path is resolved at build time with Bun.resolveSync inside packages/opencode. Verified with Docker on an arm64 host: the overlay builds on debian:bookworm-slim and on buildpack-deps:jammy (bun install --frozen-lockfile with HUSKY=0; jammy's python stays 3.10.12); the check_command passes under `bash -lc` with --network none and no env on both images; a full run_command under `bash -lc` in /work against a fake OpenAI chat-completions server at $PROXY_URL succeeded on both images: two streamed POST $PROXY_URL/v1/chat/completions calls carrying 21 tool definitions, the returned `bash` tool call executed (auto-approved), /work/hello.txt created, six JSON events on stdout tee'd to /out/kilo-run.jsonl, session data under /out/xdg, exit 0. Design notes: the AI SDK providers do not read OPENAI_BASE_URL, so the proxy URL is injected via KILO_CONFIG_CONTENT as a custom provider \"proxy\" using @ai-sdk/openai-compatible (the built-in openai provider would use the Responses API, which the proxy does not speak); OPENAI_BASE_URL/OPENAI_API_KEY are kept in env only as harmless belt-and-braces. Do not set KILO_DISABLE_PROJECT_CONFIG: it stops the agent from reading the task directory's AGENTS.md/instructions. lsp:false and formatter:false mirror the repo's own test env. The model name is arbitrary (the proxy substitutes the real model). On x86_64 hosts without AVX2, swap the bun zip for bun-linux-x64-baseline."
+}

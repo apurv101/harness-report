@@ -1,0 +1,32 @@
+{
+  "summary": "llm-consortium is a plugin for Simon Willison's `llm` CLI, not a standalone agent. It adds a `llm consortium` command group and registers each saved consortium as an `llm` model. When you prompt one (`llm -m <name> \"prompt\"`), it sends the prompt to several member models in parallel through `llm.get_model(...)`. An arbiter model then combines the answers into one, and the cycle repeats until a confidence threshold or the iteration limit is reached. All model traffic goes through llm's built-in OpenAI chat client, which uses the openai Python SDK. The recipe sets up one OpenAI-compatible model, `proxy-model`, in llm's `extra-openai-models.yaml` with api_base=$PROXY_URL/v1. It saves a consortium of 2 instances of that model, with the same model as arbiter. It then runs the task text once through `llm -m cns \"$TASK\"`. The result is text only: this harness has no tools and cannot read or edit files in the working directory.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\nENV DEBIAN_FRONTEND=noninteractive\nRUN (command -v curl >/dev/null && [ -f /etc/ssl/certs/ca-certificates.crt ]) || \\\n    (apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*)\nENV UV_INSTALL_DIR=/opt/harness/uv \\\n    UV_PYTHON_INSTALL_DIR=/opt/harness/python \\\n    UV_CACHE_DIR=/tmp/uv-cache \\\n    UV_NO_CONFIG=1\nRUN mkdir -p /opt/harness/bin && curl -LsSf https://astral.sh/uv/install.sh | env INSTALLER_NO_MODIFY_PATH=1 sh\nCOPY . /opt/harness/src\nRUN cd /opt/harness/src \\\n && /opt/harness/uv/uv python install 3.12 \\\n && /opt/harness/uv/uv venv --python 3.12 /opt/harness/venv \\\n && /opt/harness/uv/uv export --frozen --no-dev --no-emit-project --no-hashes -o /tmp/req.txt \\\n && /opt/harness/uv/uv pip install --python /opt/harness/venv/bin/python -r /tmp/req.txt -e /opt/harness/src \\\n && ln -s /opt/harness/venv/bin/llm /opt/harness/bin/llm \\\n && rm -rf /tmp/uv-cache /tmp/req.txt\nENV PATH=/opt/harness/bin:$PATH \\\n    LLM_CONSORTIUM_SKIP_DEP_CHECK=1\nRUN echo 'case \":$PATH:\" in *:/opt/harness/bin:*) ;; *) export PATH=/opt/harness/bin:$PATH ;; esac' > /etc/profile.d/00-harness.sh\n",
+  "run_command": "set -e\nmkdir -p /out\nD=\"$XDG_CONFIG_HOME/io.datasette.llm\"; mkdir -p \"$D\"\nprintf -- '- model_id: proxy-model\\n  model_name: gpt-4o\\n  api_base: \"%s/v1\"\\n  can_stream: true\\n' \"$PROXY_URL\" > \"$D/extra-openai-models.yaml\"\nllm consortium save cns -m proxy-model:2 --arbiter proxy-model --min-iterations 1 --max-iterations 2 --confidence-threshold 0.8 >/dev/null\nllm -m cns \"$TASK\" | tee /out/answer.md",
+  "check_command": "llm --version && llm consortium --help >/dev/null && llm plugins | grep -q llm-consortium && echo ok",
+  "env": [
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "XDG_CONFIG_HOME",
+      "value": "/out/config"
+    },
+    {
+      "name": "LLM_CONSORTIUM_SKIP_DEP_CHECK",
+      "value": "1"
+    },
+    {
+      "name": "PYTHONUNBUFFERED",
+      "value": "1"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "Tested locally with Docker against a fake OpenAI-compatible server, on both python:3.12-slim-bookworm and buildpack-deps:jammy. The CLI loads, the plugin registers, and a full consortium run finishes. It makes several chat-completions calls: two members plus the arbiter per iteration, some streaming and some not, plus possible arbiter \"repair\" retries.\n- **Config and logs:** XDG_CONFIG_HOME=/out/config puts everything in /out/config/io.datasette.llm. This is needed because the consortium db ignores LLM_USER_PATH and uses click.get_app_dir. That folder holds llm's own logs.db (every prompt and response), consortium_logs.db (runs, iterations, arbiter decisions) and the model yaml. The final answer is also written to /out/answer.md.\n- **Editable install:** the repo's package-data list leaves out arbiter_system.xml and the rank_*.xml prompts. A normal wheel install logs \"Error reading arbiter_system.xml\", so the Dockerfile uses an editable install from /opt/harness/src.\n- **PATH:** a profile.d script adds /opt/harness/bin back to PATH, because Debian's /etc/profile resets PATH in `bash -lc`.\n- **Pinned versions:** dependencies come from uv.lock, including llm 0.19.1.\n- **Limitation:** this is a prompt-to-answer tool, not a coding agent. It cannot run shell commands or edit files in the task directory, so benchmark tasks that need file changes will fail."
+}

@@ -1,0 +1,44 @@
+{
+  "summary": "The harness is pi (earendil-works/pi), a TypeScript coding agent whose CLI lives in packages/coding-agent (npm name @earendil-works/pi-coding-agent, bin `pi` -> dist/bundle/cli.js, Node >=22.19). Non-interactive use is print mode (`pi --print ... -- \"<prompt>\"`), which runs the built-in read/bash/edit/write tools against the current working directory, writes the final assistant text to stdout, persists the trajectory as a session JSONL under --session-dir, and exits 0/1. Model calls go through packages/ai adapters (Anthropic SDK for `anthropic-messages`, OpenAI SDK for `openai-completions`); the built-in providers do NOT honor ANTHROPIC_BASE_URL/OPENAI_BASE_URL, so the proxy is wired via a `models.json` custom provider in $PI_CODING_AGENT_DIR (baseUrl=$PROXY_URL, api=anthropic-messages, apiKey=proxy). The run command writes that file at run time and selects `--model proxy/<id>`. The Anthropic SDK posts to $PROXY_URL/v1/messages?beta=true (SSE streaming, x-api-key: proxy). The image build follows CI exactly (`npm ci --ignore-scripts && npm run build`); the build step needs network because it hydrates the gitignored packages/ai/src/providers/data JSON that the runtime imports. Verified end to end in Docker (bookworm and jammy bases) against a fake Anthropic streaming server: tool call executed in cwd, session saved under /out, exit 0.",
+  "base_image": "buildpack-deps:bookworm",
+  "dockerfile": "ARG BASE=buildpack-deps:bookworm\nFROM ${BASE}\n\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update \\\n  && apt-get install -y --no-install-recommends ca-certificates curl xz-utils git bash \\\n  && rm -rf /var/lib/apt/lists/*\n\n# Self-contained Node runtime under /opt/harness. It is NOT put on PATH so the base\n# image's own node (if any) stays first for the task; the pi wrapper pins it by absolute path.\nARG NODE_VERSION=22.23.3\nRUN set -eux; \\\n  case \"$(uname -m)\" in x86_64) narch=x64 ;; aarch64) narch=arm64 ;; *) echo \"unsupported arch: $(uname -m)\"; exit 1 ;; esac; \\\n  mkdir -p /opt/harness/node; \\\n  curl -fsSL \"https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${narch}.tar.xz\" \\\n    | tar -xJ --strip-components=1 -C /opt/harness/node\n\n# Harness source (repo root is the build context).\nCOPY . /opt/harness/src\n\n# Install pinned deps and build the CLI bundle exactly like CI does:\n# generate-models hydrates packages/ai/src/providers/data (gitignored, imported at runtime),\n# then tsgo compiles every workspace and esbuild emits packages/coding-agent/dist/bundle/cli.js.\nRUN cd /opt/harness/src \\\n  && export PATH=/opt/harness/node/bin:$PATH \\\n  && npm ci --ignore-scripts \\\n  && npm run build \\\n  && npm cache clean --force\n\n# Entrypoint wrapper. /etc/profile resets PATH in login shells (bash -lc), so also expose it\n# via /usr/local/bin and profile.d.\nRUN mkdir -p /opt/harness/bin \\\n  && printf '#!/bin/sh\\nexec /opt/harness/node/bin/node /opt/harness/src/packages/coding-agent/dist/bundle/cli.js \"$@\"\\n' > /opt/harness/bin/pi \\\n  && chmod +x /opt/harness/bin/pi \\\n  && ln -sf /opt/harness/bin/pi /usr/local/bin/pi \\\n  && printf 'export PATH=/opt/harness/bin:$PATH\\n' > /etc/profile.d/pi-harness.sh \\\n  && /opt/harness/bin/pi --version\n\nENV PATH=/opt/harness/bin:$PATH\n",
+  "run_command": "set -euo pipefail; mkdir -p \"$PI_CODING_AGENT_DIR\" /out/pi-sessions; printf '{\"providers\":{\"proxy\":{\"baseUrl\":\"%s\",\"api\":\"anthropic-messages\",\"apiKey\":\"proxy\",\"models\":[{\"id\":\"%s\",\"name\":\"%s (proxy)\",\"reasoning\":true,\"input\":[\"text\",\"image\"],\"contextWindow\":200000,\"maxTokens\":32000}]}}}\\n' \"$PROXY_URL\" \"$PI_PROXY_MODEL\" \"$PI_PROXY_MODEL\" > \"$PI_CODING_AGENT_DIR/models.json\"; exec pi --print --offline --no-extensions --no-skills --no-prompt-templates --model \"proxy/$PI_PROXY_MODEL\" --thinking \"$PI_THINKING\" --session-dir /out/pi-sessions -- \"$TASK\" </dev/null",
+  "check_command": "pi --version && pi --help >/dev/null && echo CHECK_OK",
+  "env": [
+    {
+      "name": "PROXY_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "PI_PROXY_MODEL",
+      "value": "claude-sonnet-4-5"
+    },
+    {
+      "name": "PI_THINKING",
+      "value": "off"
+    },
+    {
+      "name": "PI_CODING_AGENT_DIR",
+      "value": "/tmp/pi-agent"
+    },
+    {
+      "name": "PI_OFFLINE",
+      "value": "1"
+    },
+    {
+      "name": "PI_SKIP_VERSION_CHECK",
+      "value": "1"
+    },
+    {
+      "name": "PI_TELEMETRY",
+      "value": "0"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Verified locally with Docker (arm64) on both buildpack-deps:bookworm and buildpack-deps:jammy (the benchmark base): image builds, `bash -lc 'pi --version && pi --help'` passes, and a full run against a fake Anthropic SSE server executed pi's `write` tool in the mounted cwd, saved the session JSONL to /out/pi-sessions/, printed the final text, exit 0.\n\nWhy models.json instead of env base URLs: pi's built-in anthropic/openai providers have no ANTHROPIC_BASE_URL/OPENAI_BASE_URL support (only AZURE_OPENAI_BASE_URL); custom endpoints are configured in $PI_CODING_AGENT_DIR/models.json, which the run command generates from $PROXY_URL at run time (nothing baked into the image). The Anthropic SDK appends the path itself, so baseUrl is $PROXY_URL (no /v1); requests land on $PROXY_URL/v1/messages?beta=true with header x-api-key: proxy. The proxy must tolerate the `?beta=true` query string. To use the OpenAI side instead, change the printf to \"baseUrl\":\"$PROXY_URL/v1\",\"api\":\"openai-completions\" and set api_style=openai.\n\nModel/thinking: PI_PROXY_MODEL is only a label (proxy substitutes the real model); any id works because the provider is fully custom. PI_THINKING=off sends `thinking: {type: disabled}` and avoids extended-thinking/beta features the far-side model may not support; set to low/medium/high for Claude with thinking. Cost is reported as 0 (custom provider).\n\nRuntime flags: --offline (+PI_OFFLINE/PI_SKIP_VERSION_CHECK) disables catalog refresh and version check; --no-extensions/--no-skills/--no-prompt-templates keep task-directory .pi resources from loading (print mode also cannot show the project-trust prompt, so trust-gated resources are skipped anyway). AGENTS.md/CLAUDE.md in the task dir are still read as context. stdin is redirected from /dev/null because non-TTY stdin is read as prompt prefix until EOF. `--` guards tasks starting with `-` or `@`. Session JSONL (full trajectory incl. tool calls) lands in /out/pi-sessions/*.jsonl; add `--mode json` instead of `--print` if you want the JSONL event stream on stdout. ANTHROPIC_API_KEY=proxy is not needed by the proxy provider but harmless; it only makes pi's built-in anthropic provider appear authenticated.\n\nBuild notes: `npm run build` runs packages/ai generate-models (--strict) which fetches models.dev/openrouter/etc. at image-build time; the resulting src/providers/data/*.json is imported at runtime, so it cannot be skipped. CI does the same steps. The wrapper pins /opt/harness/node/bin/node by absolute path; /opt/harness/node/bin is intentionally NOT on PATH so the base image's node stays first for task tests. Image size ~430-520 MB on top of base."
+}

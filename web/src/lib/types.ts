@@ -195,3 +195,56 @@ export interface RepoOption {
   description: string
   visibility: 'Public' | 'Private'
 }
+
+/** One evaluation started from the site: run.sh on a repo × the bowling task.  See evals.py. */
+export type EvalStatus = 'running' | 'done' | 'failed' | 'cancelled'
+
+export interface Evaluation {
+  id: string
+  repo: string
+  url: string
+  taskset: string
+  task: string
+  /** runs/<run>: the run folder, listed on the Runs page from the moment it starts */
+  run: string
+  user?: string | null
+  status: EvalStatus
+  started: string
+  finished?: string | null
+  rc?: number | null
+  cancelled?: boolean
+  error?: string | null
+}
+
+/** One line run.sh writes with HR_EVENTS set. */
+export interface EvalEvent {
+  ts: number
+  type: 'stage' | 'fetched' | 'recipe' | 'built' | 'run' | 'result' | 'error' | string
+  stage?: string
+  t?: number
+  msg?: string
+  mode?: 'reused' | 'analyzed' | 'failed'
+  seeded_from?: string
+  commit?: string
+  reward?: number | null
+  [key: string]: unknown
+}
+
+/** The model calls so far, read from the run's calls.jsonl as it grows. */
+export interface EvalLive {
+  calls: number
+  input_tokens: number
+  output_tokens: number
+  errors: number
+  last_action: string | null
+}
+
+/** What GET /api/evals/<id>?after=<n> answers. */
+export interface EvalState {
+  eval: Evaluation
+  events: EvalEvent[]
+  next: number
+  live: EvalLive
+  /** the run's summary (reward, tests, calls) once it has finished */
+  result: RunSummary | null
+}

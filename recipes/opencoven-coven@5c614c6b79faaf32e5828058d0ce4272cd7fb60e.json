@@ -1,0 +1,72 @@
+{
+  "summary": "Coven (crates/coven-cli, binary `coven`) is a Rust \"harness substrate\": it does not call a model itself but launches an external coding-agent CLI (Claude Code, Codex, Copilot CLI, ...) inside a project-rooted session, records the session in a SQLite ledger under $COVEN_HOME, and streams events. `coven run <harness> \"<prompt>\"` runs the harness in-process (no daemon required: the run path calls activate_direct_launch_with_runner and pty_runner directly); the project root is simply the canonicalized cwd. With `--stream-json` and the built-in `claude` adapter it spawns `claude --permission-mode bypassPermissions --print --output-format stream-json --verbose --session-id <uuid> -- <prompt>` over ordinary pipes (stdin null, stdout parsed as JSONL, stderr inherited), frames it with its own system/result events, and propagates Claude's exit code. Coven deliberately injects no provider credentials, so the model path is entirely Claude Code's: ANTHROPIC_BASE_URL/ANTHROPIC_API_KEY/ANTHROPIC_MODEL route every call to the proxy's Anthropic messages API. The bypass-permissions flag is only added when COVEN_CLAUDE_BYPASS_PERMISSIONS=1, and Claude Code accepts it as root only with IS_SANDBOX=1.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\n\nENV DEBIAN_FRONTEND=noninteractive\n\n# Only what the base may lack: TLS roots, curl/git (git is also needed because\n# .cargo/config.toml fetches git deps with the git CLI), xz for the node tarball,\n# and a C toolchain for rusqlite(bundled)/ring.\nRUN apt-get update \\\n && apt-get install -y --no-install-recommends ca-certificates curl git xz-utils build-essential pkg-config \\\n && rm -rf /var/lib/apt/lists/*\n\n# --- Node runtime + Claude Code, the harness coven will supervise (self-contained) ---\nARG NODE_VERSION=22.12.0\nRUN set -eux; \\\n    arch=\"$(uname -m)\"; \\\n    case \"$arch\" in x86_64) narch=x64 ;; aarch64) narch=arm64 ;; *) echo \"unsupported arch: $arch\" >&2; exit 1 ;; esac; \\\n    mkdir -p /opt/harness/node; \\\n    curl -fsSL \"https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${narch}.tar.xz\" \\\n      | tar -xJ -C /opt/harness/node --strip-components=1\n\nENV PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH\n\nARG CLAUDE_CODE_VERSION=latest\nRUN npm install -g --prefix /opt/harness/node \"@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}\" \\\n && npm cache clean --force\n\n# --- Build coven from the repo source (build context = repo root) ---\nCOPY . /opt/harness/src\n\nRUN set -eux; \\\n    export RUSTUP_HOME=/opt/harness/rustup CARGO_HOME=/opt/harness/cargo CARGO_TARGET_DIR=/tmp/coven-target; \\\n    curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path; \\\n    export PATH=\"/opt/harness/cargo/bin:$PATH\"; \\\n    cargo install --locked --path /opt/harness/src/crates/coven-cli --root /opt/harness; \\\n    rm -rf /tmp/coven-target /opt/harness/rustup /opt/harness/cargo /opt/harness/src/target; \\\n    /opt/harness/bin/coven --version\n\n# Non-secret runtime defaults (all overridable by the run env).\nENV COVEN_HOME=/tmp/coven-home \\\n    COVEN_CLAUDE_BYPASS_PERMISSIONS=1 \\\n    IS_SANDBOX=1 \\\n    NO_COLOR=1 \\\n    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \\\n    DISABLE_AUTOUPDATER=1 \\\n    DISABLE_TELEMETRY=1 \\\n    DISABLE_ERROR_REPORTING=1\n\nRUN mkdir -p /out /tmp/coven-home\n",
+  "run_command": "set -o pipefail; mkdir -p /out \"$COVEN_HOME\"; coven --color never run claude --stream-json --title \"harness task\" -- \"$TASK\" 2> >(tee /out/coven-stderr.log >&2) | tee /out/coven-stream.jsonl; rc=${PIPESTATUS[0]}; cp -a \"$COVEN_HOME\" /out/coven-home 2>/dev/null || true; exit $rc",
+  "check_command": "coven --version && coven run --help >/dev/null && claude --version && command -v claude",
+  "env": [
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "ANTHROPIC_MODEL",
+      "value": "claude-sonnet-4-5"
+    },
+    {
+      "name": "ANTHROPIC_SMALL_FAST_MODEL",
+      "value": "claude-sonnet-4-5"
+    },
+    {
+      "name": "COVEN_HOME",
+      "value": "/tmp/coven-home"
+    },
+    {
+      "name": "COVEN_CLAUDE_BYPASS_PERMISSIONS",
+      "value": "1"
+    },
+    {
+      "name": "IS_SANDBOX",
+      "value": "1"
+    },
+    {
+      "name": "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_AUTOUPDATER",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_TELEMETRY",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_ERROR_REPORTING",
+      "value": "1"
+    },
+    {
+      "name": "DISABLE_NON_ESSENTIAL_MODEL_CALLS",
+      "value": "1"
+    },
+    {
+      "name": "NO_COLOR",
+      "value": "1"
+    },
+    {
+      "name": "CI",
+      "value": "1"
+    },
+    {
+      "name": "TERM",
+      "value": "dumb"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Why Claude Code as the supervised harness: coven has no model client of its own (coven-agents is a provider-neutral loop with no HTTP client, and docs/harnesses/provider-auth.md states coven never injects credentials). Of its bundled adapters, the `claude` one is the cleanest proxy fit: Claude Code honors ANTHROPIC_BASE_URL for every call, and the adapter declares native stream support, so `coven run claude --stream-json` runs Claude over plain pipes (Stdio::null stdin, piped stdout) rather than a PTY, which is what makes it work with a non-tty stdin. Codex would need a custom-provider config.toml with wire_api=chat plus sandbox flags, so it was not chosen.\n\nInvocation details verified in source: session_launch::resolve_launch_paths canonicalizes cwd as the project root (no git or registration needed); the run path never contacts the daemon (activate_direct_launch_with_runner + pty_runner::stream_harness in-process); session ids are Uuid::new_v4, so the `--session-id` coven passes to Claude is valid; COVEN_CLAUDE_BYPASS_PERMISSIONS=1 prepends `--permission-mode bypassPermissions` (harness.rs with_claude_permission_flags_enabled); Claude Code refuses that mode as root unless IS_SANDBOX=1. The `--` before \"$TASK\" is safe because clap treats the prompt as trailing positionals. Exit code: coven exits non-zero via exit_with_session_code when Claude's exit code is non-zero; the run command preserves it through PIPESTATUS.\n\nCaveats: (1) coven expands `@path`, `@T-<id>` and `@@search` references inside the prompt before dispatch (prompt_refs.rs), so a task text containing `@somefile` that exists may get inlined. (2) Build needs network for crates.io, the two public GitHub git deps (OpenCoven/coven-runtimes, OpenCoven/coven-threads, both confirmed anonymously fetchable), nodejs.org, and the npm registry; the Rust compile of coven-cli is heavy (15k-line daemon module + sqlite/rustls) and can take 10-20 minutes. The toolchain, cargo home and target dir are removed after the build; the source stays at /opt/harness/src. (3) No .dockerignore exists, so .git is copied and build.rs stamps `coven --version` with git describe. (4) Outputs under /out: coven-stream.jsonl (coven system/result frames wrapping Claude Code's native stream-json events), coven-stderr.log, and a copy of COVEN_HOME (coven.sqlite3 session ledger + event log). (5) Claude Code uses the Anthropic messages API only; the proxy must accept its extra requests (e.g. anthropic-beta headers, count_tokens). CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC / DISABLE_NON_ESSENTIAL_MODEL_CALLS suppress update checks, telemetry and side model calls. (6) The benchmark image (buildpack-deps:jammy) already has gcc/git/curl, so apt-get there only adds xz-utils/pkg-config; the base image's python/node are untouched because node lives in /opt/harness/node and coven is a static-ish Rust binary in /opt/harness/bin."
+}

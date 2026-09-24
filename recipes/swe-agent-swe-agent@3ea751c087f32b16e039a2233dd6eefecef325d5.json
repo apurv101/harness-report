@@ -1,0 +1,36 @@
+{
+  "summary": "SWE-agent (Princeton/Stanford) is a Python agent harness whose CLI entrypoint is `sweagent` (sweagent.run.run:main). `sweagent run` loads a YAML agent config (config/default.yaml: bash + str_replace_editor tools, function calling), starts an execution environment through SWE-ReX, and loops over LM calls made with litellm (sweagent/agent/models.py, `litellm.completion` with `api_base`/`api_key` from `--agent.model.*`). Inside the sandbox we use the SWE-ReX `local` deployment so commands run directly in the container, not in a nested Docker container. We also use a `preexisting` repo pointing at the task's cwd, so the agent cds into it and edits files in place. The model is `openai/gpt-4o`, which uses the OpenAI chat-completions route of the proxy via api_base=$PROXY_URL/v1. The trajectory and logs are written to /out/<id>/.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\nENV DEBIAN_FRONTEND=noninteractive\nRUN set -eux; missing=\"\"; \\\n    for p in ca-certificates curl git bash; do dpkg -s \"$p\" >/dev/null 2>&1 || missing=\"$missing $p\"; done; \\\n    command -v python3 >/dev/null 2>&1 || missing=\"$missing python3\"; \\\n    if [ -n \"$missing\" ]; then apt-get update && apt-get install -y --no-install-recommends $missing && rm -rf /var/lib/apt/lists/*; fi\nENV UV_PYTHON_INSTALL_DIR=/opt/harness/python \\\n    UV_CACHE_DIR=/opt/harness/.uv-cache \\\n    UV_NO_MODIFY_PATH=1\nRUN mkdir -p /opt/harness/bin && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/opt/harness/bin sh\nCOPY . /opt/harness/src\nRUN /opt/harness/bin/uv python install 3.12 \\\n && /opt/harness/bin/uv venv --python 3.12 /opt/harness/venv \\\n && /opt/harness/bin/uv pip install --python /opt/harness/venv/bin/python -e /opt/harness/src \\\n && ln -sf /opt/harness/venv/bin/sweagent /opt/harness/bin/sweagent \\\n && rm -rf /opt/harness/.uv-cache\nENV PATH=/opt/harness/bin:$PATH \\\n    SWE_AGENT_CONFIG_DIR=/opt/harness/src/config \\\n    SWE_AGENT_TOOLS_DIR=/opt/harness/src/tools \\\n    SWE_AGENT_TRAJECTORY_DIR=/opt/harness/src/trajectories\n",
+  "run_command": "mkdir -p /out && sweagent run --config /opt/harness/src/config/default.yaml --agent.model.name=openai/gpt-4o --agent.model.api_base=\"$PROXY_URL/v1\" --agent.model.api_key=proxy --agent.model.per_instance_cost_limit=0 --agent.model.total_cost_limit=0 --env.deployment.type=local --env.repo.type=preexisting --env.repo.repo_name=\"${PWD#/}\" --env.repo.reset=false --problem_statement.text=\"$TASK\" --output_dir=/out",
+  "check_command": "sweagent run --help | head -5 && python3 --version",
+  "env": [
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "LITELLM_LOCAL_MODEL_COST_MAP",
+      "value": "True"
+    },
+    {
+      "name": "HF_HUB_OFFLINE",
+      "value": "1"
+    },
+    {
+      "name": "HF_DATASETS_OFFLINE",
+      "value": "1"
+    },
+    {
+      "name": "PYTHONUNBUFFERED",
+      "value": "1"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "I built this recipe on top of a copy of the benchmark task image (buildpack-deps:jammy + python3.11, built as a local stand-in). In that image, `sweagent run --help` works, and a full run from /app with PROXY_URL pointing at a dead port got through setup: the local SWE-ReX deployment started, the tools were installed, and the agent changed into /app. It then made the litellm call to $PROXY_URL/v1/chat/completions, which failed with a connection error as expected. The trajectory and logs were still written to /out/<id>/ (.traj, .info/.debug/.trace.log, .pred). I have not tested it against a live proxy or the plain python:3.12-slim-bookworm base.\n\nDesign choices:\n- `--env.deployment.type=local`: the default is Docker-in-Docker, which isn't available inside the sandbox.\n- `--env.repo.type=preexisting` with `repo_name=${PWD#/}` and `reset=false`: the agent works in the task cwd in place. SWE-agent assumes the repo sits under /, so we pass the cwd path without its leading slash. The run exports ROOT and changes into that directory. With `reset=false` it never runs git reset or clean.\n- Cost limits are set to 0, so litellm's cost lookup can never abort the run. The model name `openai/gpt-4o` is known to litellm, and the proxy swaps in the real model.\n\nCaveats:\n- If the task directory is not a git repo, the final submit step (`git add -A && git diff`) logs an error and no patch is saved. The file edits themselves stay in place in the cwd.\n- The harness's own tool bundles run with the base image's `python3` (`#!/usr/bin/env python3`). The harness venv is deliberately kept off PATH so the agent's shell uses the task's python. The Dockerfile installs python3 only if the base image has none.\n- One tool's install.sh (edit_anthropic) runs `pip install tree-sitter==0.21.3 tree-sitter-languages || true` at run time. If the base image has pip and there is network access, this could add those packages to the base python. Offline, it just fails, and that is harmless: the feature is only used to summarise large .py files.\n- There is no step limit by default. Add `--agent.model.per_instance_call_limit=N` if you want to cap the number of model calls."
+}

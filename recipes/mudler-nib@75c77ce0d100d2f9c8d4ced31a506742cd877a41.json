@@ -1,0 +1,36 @@
+{
+  "summary": "nib (github.com/mudler/nib) is a single Go binary terminal coding agent (module `go 1.26`, entrypoint main.go -> app.Main). It has a TUI by default and a plain, pipe-friendly `--cli` mode that reads prompts line by line from stdin, answers each with built-in tools (read/write/grep/glob/bash, sub-agents, skills), and exits 0 when stdin hits EOF; `--yolo` (or NIB_YOLO=1) auto-approves every tool call so a piped run can edit files. The default provider is \"openai\", i.e. any OpenAI-compatible chat-completions endpoint driven through cogito's LocalAI client on go-openai (POST $BASE_URL/chat/completions); the endpoint is configured by the bare env vars MODEL / API_KEY / BASE_URL (or ~/.config/nib/config.yaml). With a model configured and stdin not a TTY, the first-run setup wizard is skipped. Shell tools run in the process cwd. `--trace-dir DIR` writes an NDJSON LLM trace plus usage.json; session records land under $XDG_CONFIG_HOME/nib/sessions.",
+  "base_image": "debian:bookworm-slim",
+  "dockerfile": "ARG BASE=debian:bookworm-slim\nFROM ${BASE}\n\n# Go toolchain used only to compile nib; removed after the build.\nARG GO_VERSION=1.26.7\nENV DEBIAN_FRONTEND=noninteractive\n\nRUN apt-get update \\\n && apt-get install -y --no-install-recommends ca-certificates curl git bash \\\n && rm -rf /var/lib/apt/lists/*\n\n# Harness source (build context = repo root). Never modified, only compiled.\nCOPY . /opt/harness/src\n\nRUN set -eux; \\\n    arch=\"$(dpkg --print-architecture)\"; \\\n    mkdir -p /opt/harness/bin /opt/harness/go; \\\n    curl -fsSL \"https://go.dev/dl/go${GO_VERSION}.linux-${arch}.tar.gz\" \\\n      | tar -xz -C /opt/harness/go --strip-components=1; \\\n    cd /opt/harness/src; \\\n    GOTOOLCHAIN=auto GOPATH=/tmp/gopath GOMODCACHE=/tmp/gomod GOCACHE=/tmp/gocache CGO_ENABLED=0 \\\n      /opt/harness/go/bin/go build -trimpath -ldflags=\"-s -w\" -o /opt/harness/bin/nib . ; \\\n    rm -rf /tmp/gopath /tmp/gomod /tmp/gocache /opt/harness/go\n\n# Login shells (bash -lc) on Debian reset PATH from /etc/profile, so expose nib\n# through profile.d and a /usr/local/bin symlink as well as ENV PATH.\nRUN printf 'export PATH=/opt/harness/bin:$PATH\\n' > /etc/profile.d/harness.sh \\\n && ln -sf /opt/harness/bin/nib /usr/local/bin/nib\n\nENV PATH=/opt/harness/bin:$PATH\n",
+  "run_command": "set -o pipefail; mkdir -p /out/nib/trace; export XDG_CONFIG_HOME=/out/nib/xdg; printf '%s\\n' \"$TASK\" > /out/nib/task.md; case \"$TASK\" in *$'\\n'*) msg=\"Carry out the task described in the attached file, working in the current directory: @/out/nib/task.md\" ;; *) msg=\"$TASK\" ;; esac; printf '%s\\n' \"$msg\" | nib --cli --yolo --trace-dir /out/nib/trace",
+  "check_command": "nib --version && nib --help >/dev/null 2>&1",
+  "env": [
+    {
+      "name": "BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "MODEL",
+      "value": "gpt-4o-mini"
+    },
+    {
+      "name": "NIB_YOLO",
+      "value": "1"
+    },
+    {
+      "name": "LOG_LEVEL",
+      "value": "error"
+    },
+    {
+      "name": "TERM",
+      "value": "dumb"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "VERIFIED locally with Docker: the overlay builds on both debian:bookworm-slim and buildpack-deps:jammy (Go 1.26.7 tarball, CGO_ENABLED=0, toolchain and caches removed afterwards); check_command passes under `bash -lc` in both images. A smoke run of the exact run_command with a multi-line TASK and an unreachable BASE_URL showed: no wizard or prompt, yolo banner, system prompt reporting the container cwd as the working directory, POSTs to $BASE_URL/chat/completions with model gpt-4o-mini, trace.ndjson + usage.json written to /out/nib/trace, and the task text inlined verbatim into the first user message as \"[Attached: task.md \u2014 converted to text]\\n<task>\\n[End of task.md]\" followed by the instruction line. An earlier Dockerfile without the profile.d/symlink step failed the check on Debian because /etc/profile resets PATH for login shells; the final Dockerfile fixes that. Design details: (1) nib --cli reads stdin one line per turn, so a multi-line $TASK would be split into several turns; the run command pipes a single-line task directly and, for a multi-line task, writes it verbatim to /out/nib/task.md and references it with nib's inline `@path` attachment syntax so the whole text lands in one user message. (2) --yolo forces approval_mode auto so writes and shell commands run unattended; without it a piped run denies non-read-only tools and exits 3. (3) The setup wizard is skipped whenever MODEL is set; stdin is never a TTY here so it cannot launch. (4) Provider \"openai\" with a custom BASE_URL uses only API_KEY for auth; first-turn probes to /models, /models/capabilities and context-size detection are best-effort and fall back silently. (5) The only run-time network destination is the proxy; Go is fetched from go.dev only at image build. (6) Exit codes: 0 answered/EOF, 1 failure (including exhausted backend retries), 2 bad flag, 3 refused a tool call (impossible with --yolo). On backend errors nib retries up to 10 times with backoff before giving up. (7) /out/nib/trace holds the LLM trace, /out/nib/xdg/nib/sessions the session record, /out/nib/task.md the task text. TERM=dumb is optional; nib already degrades its spinner when stdout is not a TTY."
+}

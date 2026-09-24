@@ -1,7 +1,13 @@
-import { useLive } from '../../state/SessionContext'
+import { useLive, useServed } from '../../state/SessionContext'
 
-/** Says out loud that the GitHub connection and the task result are simulated.  Hidden once they are not. */
+/**
+ * Says out loud what is simulated.  On the static site: the GitHub connection and the task result.  With serve.py
+ * but no GitHub sign-in configured: only the connection — runs are real.  Hidden once nothing is.
+ */
 export function PreviewNotice() {
-  if (useLive()) return null
-  return <div className="preview-notice">Preview · GitHub connection and task results are simulated.</div>
+  const live = useLive(); const served = useServed()
+  if (live || served === null) return null      // null: still asking serve.py
+  return <div className="preview-notice">
+    {served ? 'Preview · GitHub connection is simulated. Runs are real, on this machine.' : 'Preview · GitHub connection and task results are simulated.'}
+  </div>
 }

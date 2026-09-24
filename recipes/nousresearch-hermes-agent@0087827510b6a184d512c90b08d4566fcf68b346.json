@@ -1,0 +1,52 @@
+{
+  "summary": "Hermes Agent (NousResearch/hermes-agent, v0.21.4) is a Python 3.11+ personal AI agent with a CLI entrypoint `hermes` (console script hermes_cli.main:main). One task runs non-interactively via `hermes chat -q \"<task>\" --oneshot`, which drives the tool-calling loop (terminal, read/write/patch file, search, etc.) in the current working directory and exits with 0 on completion. The model is called through the OpenAI Python SDK against an OpenAI-compatible chat-completions endpoint (api_mode chat_completions, streaming, function tools) when `model.provider: custom` is set in $HERMES_HOME/config.yaml with `base_url`/`api_key`/`default`; the bare custom resolver deliberately ignores OPENAI_BASE_URL, so the run command materialises config.yaml from the env vars before launching. Approvals are bypassed with --yolo/HERMES_YOLO_MODE=1, hook prompts with --accept-hooks, and the free-tier/first-run wizard never triggers because a provider is configured. Startup makes harmless model-discovery probes (GET /v1/models, GET /v1/models/<id>, POST /api/show, GET /api/v1/models) that the proxy may 404.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\n\n# Self-contained Hermes runtime under /opt/harness: uv-managed CPython 3.11 plus a\n# locked project venv. Only the `hermes` entrypoint (and uv) are exposed on PATH so\n# the base image's own python3/node stay authoritative for the task.\nRUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \\\n        ca-certificates curl git build-essential ripgrep procps \\\n    && rm -rf /var/lib/apt/lists/*\n\nRUN mkdir -p /opt/harness/bin /opt/harness/python \\\n    && curl -LsSf https://astral.sh/uv/install.sh \\\n       | env UV_INSTALL_DIR=/opt/harness/bin INSTALLER_NO_MODIFY_PATH=1 sh \\\n    && UV_PYTHON_INSTALL_DIR=/opt/harness/python /opt/harness/bin/uv python install 3.11\n\n# Source tree (build context = repo root). The repo's .dockerignore drops root\n# *.md, so recreate the README that pyproject's `readme =` field points at.\nCOPY . /opt/harness/src\nRUN touch /opt/harness/src/README.md\n\n# Locked, editable install of hermes-agent + its [all] extra into /opt/harness/venv.\nRUN cd /opt/harness/src \\\n    && UV_PYTHON_INSTALL_DIR=/opt/harness/python \\\n       UV_PROJECT_ENVIRONMENT=/opt/harness/venv \\\n       UV_LINK_MODE=copy UV_NO_CACHE=1 \\\n       /opt/harness/bin/uv sync --frozen --python 3.11 --extra all --no-dev \\\n    && rm -rf /root/.cache/uv\n\n# Entrypoint shim (its shebang targets the venv interpreter, so no venv on PATH).\n# `bash -lc` sources /etc/profile, which resets PATH on Debian/Ubuntu, so the\n# harness dir is re-added from profile.d as well.\nRUN ln -sf /opt/harness/venv/bin/hermes /opt/harness/bin/hermes \\\n    && ln -sf /opt/harness/venv/bin/hermes /usr/local/bin/hermes \\\n    && printf 'export PATH=/opt/harness/bin:$PATH\\n' > /etc/profile.d/zz-hermes-harness.sh\n\nENV PATH=/opt/harness/bin:$PATH\n",
+  "run_command": "export HERMES_HOME=\"${HERMES_HOME:-/out/hermes-home}\"; mkdir -p \"$HERMES_HOME\" /out; printf 'model:\\n  default: \"%s\"\\n  provider: custom\\n  base_url: \"%s\"\\n  api_key: \"%s\"\\nnous:\\n  guest: false\\n' \"${HERMES_INFERENCE_MODEL:-gpt-4.1}\" \"$OPENAI_BASE_URL\" \"${OPENAI_API_KEY:-proxy}\" > \"$HERMES_HOME/config.yaml\"; hermes chat -q \"$TASK\" --oneshot --yolo --accept-hooks --cli --source tool 2>&1 | tee /out/hermes-run.log; exit \"${PIPESTATUS[0]}\"",
+  "check_command": "HERMES_HOME=/tmp/hermes-check hermes --version && HERMES_HOME=/tmp/hermes-check hermes --help >/dev/null",
+  "env": [
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "HERMES_INFERENCE_MODEL",
+      "value": "gpt-4.1"
+    },
+    {
+      "name": "HERMES_HOME",
+      "value": "/out/hermes-home"
+    },
+    {
+      "name": "HERMES_DISABLE_LAZY_INSTALLS",
+      "value": "1"
+    },
+    {
+      "name": "HERMES_YOLO_MODE",
+      "value": "1"
+    },
+    {
+      "name": "HERMES_ACCEPT_HOOKS",
+      "value": "1"
+    },
+    {
+      "name": "TERM",
+      "value": "dumb"
+    },
+    {
+      "name": "NO_COLOR",
+      "value": "1"
+    },
+    {
+      "name": "PYTHONUNBUFFERED",
+      "value": "1"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "Verified locally with Docker (linux/amd64): built on python:3.12-slim-bookworm and on buildpack-deps:jammy; check command passes under `bash -lc` on both; a full task ran with --network none against a mock OpenAI-compatible server on 127.0.0.1 (streaming chat completion returning a write_file tool call, then a final text turn): hermes executed write_file in the task cwd, exited 0, and wrote config.yaml, logs/agent.log, logs/errors.log, state.db (sessions) under /out/hermes-home plus the full stdout transcript at /out/hermes-run.log. Design points: (1) Hermes's bare `custom` provider resolver ignores OPENAI_BASE_URL by design, so the run command writes the proxy endpoint into $HERMES_HOME/config.yaml (model.provider custom + base_url + api_key + default); OPENAI_API_KEY is still consulted for the key. (2) /etc/profile resets PATH under `bash -lc`, hence profile.d + /usr/local/bin/hermes symlink; the venv's bin is deliberately NOT on PATH so the base image's python3 is untouched (verified: `which python3` -> /usr/local/bin/python3 on the slim base, /usr/bin/python3 on jammy). (3) The repo .dockerignore excludes root *.md, so README.md is touched after COPY for pyproject's readme field; tests/ and website/ are excluded from context (smaller image). (4) Model name gpt-4.1 is arbitrary; any name works for provider custom (no local catalog validation) and the proxy swaps it. (5) Startup network side effects that fail harmlessly offline: model-discovery probes to the proxy (GET /v1/models, /v1/models/<id>, POST /api/show, GET /api/v1/models), a tirith scanner install attempt (marker .tirith-install-failed), and an update check. (6) Non-TTY stdin already implies one-shot; --oneshot/--cli are belt-and-braces. Use --format stream-json instead of text if a JSONL event stream is preferred over the human transcript. The Anthropic messages route is also supported by Hermes (provider anthropic + ANTHROPIC_BASE_URL, needs the `anthropic` extra) but was not used. Build takes ~2 min (uv sync of ~200 locked wheels)."
+}

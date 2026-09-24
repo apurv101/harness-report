@@ -1,0 +1,68 @@
+{
+  "summary": "Omnigent is a Python \"meta-harness\" (Click CLI, entrypoint omnigent.cli:main, installed as `omnigent`/`omni`) that orchestrates coding agents such as Claude Code, Codex, Cursor and Pi behind a local server + runner. A one-shot non-interactive task is `omnigent run <agent-dir> -p \"<task>\"`: the CLI spawns a background host daemon and local server on 127.0.0.1, the daemon spawns a runner in the CLI's cwd, the runner launches the harness, and the CLI prints the final assistant text and exits. The recipe uses the built-in `claude-sdk` harness, which drives the Claude Code CLI bundled inside the claude-agent-sdk wheel (no Node required) and therefore speaks the Anthropic messages API; ANTHROPIC_BASE_URL/ANTHROPIC_API_KEY are on Omnigent's CLI->daemon->runner env allowlists, so the CLI posts to $PROXY_URL/v1/messages. The run command materializes a small bundle config.yaml (bundle format so `permission_mode: bypassPermissions` is honored) with `executor.auth: {type: api_key}` (the executor strips ANTHROPIC_API_KEY and feeds the key through an apiKeyHelper) and `os_env.sandbox.type: none` (no bwrap needed); file/shell edits happen through Omnigent's sys_os_* MCP tools, loaded on demand via the CLI's ToolSearch. Verified end to end in Docker against a mock Anthropic server: ToolSearch -> sys_os_write wrote a file into the task cwd, final text printed, exit 0, logs copied to /out.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\n\n# Self-contained harness runtime under /opt/harness; never touches the base image's python/node.\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update \\\n    && apt-get install -y --no-install-recommends ca-certificates curl git bash procps \\\n    && rm -rf /var/lib/apt/lists/*\n\nENV UV_INSTALL_DIR=/opt/harness/bin \\\n    UV_PYTHON_INSTALL_DIR=/opt/harness/python \\\n    UV_PYTHON_PREFERENCE=only-managed \\\n    UV_PROJECT_ENVIRONMENT=/opt/harness/venv \\\n    UV_CACHE_DIR=/opt/harness/uv-cache \\\n    UV_LINK_MODE=copy \\\n    OMNIGENT_SKIP_WEB_UI=true\n\nRUN curl -LsSf https://astral.sh/uv/install.sh | env INSTALLER_NO_MODIFY_PATH=1 sh \\\n    && /opt/harness/bin/uv python install 3.12\n\n# Repo root is the build context; install omnigent (plus its sdks/ path deps) from the locked resolution.\nCOPY . /opt/harness/src\nRUN cd /opt/harness/src \\\n    && /opt/harness/bin/uv sync --frozen --no-dev --python 3.12 \\\n    && rm -rf /opt/harness/uv-cache \\\n    && ln -sf /opt/harness/venv/bin/omnigent /opt/harness/bin/omnigent \\\n    && ln -sf /opt/harness/venv/bin/omni /opt/harness/bin/omni\n\n# Only /opt/harness/bin (omnigent, omni, uv) goes on PATH: the venv's own python must NOT shadow the base image's.\n# Debian/Ubuntu /etc/profile resets PATH for login shells (bash -lc); re-add the harness bin dir there too.\nRUN printf 'export PATH=/opt/harness/bin:$PATH\\n' > /etc/profile.d/zz-omnigent-harness.sh\nENV PATH=/opt/harness/bin:$PATH\n",
+  "run_command": "set -uo pipefail\nmkdir -p /out \"$OMNIGENT_DATA_DIR\" \"$OMNIGENT_CONFIG_HOME\" \"$HOME/.claude\"\n# Claude Code opt-outs go in its settings file: plain env vars are stripped on the CLI->daemon->runner hops.\n[ -f \"$HOME/.claude/settings.json\" ] || printf '{\"env\":{\"DISABLE_TELEMETRY\":\"1\",\"DISABLE_AUTOUPDATER\":\"1\",\"DISABLE_ERROR_REPORTING\":\"1\",\"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC\":\"1\"}}\\n' > \"$HOME/.claude/settings.json\"\nAGENT_DIR=$(mktemp -d /tmp/omnigent-agent.XXXXXX)\ncat > \"$AGENT_DIR/config.yaml\" <<EOF\nspec_version: 1\nname: bench_agent\nexecutor:\n  type: omnigent\n  model: ${OMNIGENT_MODEL}\n  auth:\n    type: api_key\n    api_key: ${ANTHROPIC_API_KEY}\n  config:\n    harness: claude-sdk\n    permission_mode: bypassPermissions\nprompt: |\n  You are a software engineering agent running non-interactively inside a sandbox.\n  Work in the current working directory. Do not ask questions; complete the task\n  fully, then briefly summarize what you changed.\nos_env:\n  type: caller_process\n  sandbox:\n    type: none\nEOF\nomnigent run \"$AGENT_DIR\" -p \"$TASK\" --debug-events 2>&1 | tee /out/omnigent-run.log\nstatus=${PIPESTATUS[0]}\ncp -r \"$OMNIGENT_DATA_DIR\"/logs \"$OMNIGENT_DATA_DIR\"/debug /out/ 2>/dev/null || true\nexit $status",
+  "check_command": "omnigent --help >/dev/null && omnigent run --help >/dev/null && omnigent --version",
+  "env": [
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "OMNIGENT_MODEL",
+      "value": "claude-sonnet-4-5"
+    },
+    {
+      "name": "OMNIGENT_DATA_DIR",
+      "value": "/tmp/omnigent/data"
+    },
+    {
+      "name": "OMNIGENT_CONFIG_HOME",
+      "value": "/tmp/omnigent/config"
+    },
+    {
+      "name": "OMNIGENT_NO_UPDATE_CHECK",
+      "value": "1"
+    },
+    {
+      "name": "OMNIGENT_TELEMETRY_ENABLED",
+      "value": "0"
+    },
+    {
+      "name": "OMNIGENT_HOST_NO_OPEN",
+      "value": "1"
+    },
+    {
+      "name": "OMNIGENT_DISABLE_KEYRING",
+      "value": "1"
+    },
+    {
+      "name": "IS_SANDBOX",
+      "value": "1"
+    },
+    {
+      "name": "HOME",
+      "value": "/root"
+    },
+    {
+      "name": "NO_COLOR",
+      "value": "1"
+    },
+    {
+      "name": "TERM",
+      "value": "dumb"
+    },
+    {
+      "name": "PYTHONUNBUFFERED",
+      "value": "1"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Verified locally (Docker, arm64): overlay builds on python:3.12-slim-bookworm and on a replica of the benchmark image (buildpack-deps:jammy + deadsnakes python3.11); check_command passes on both and `python3` on the task image still resolves to the base's 3.11 (only /opt/harness/bin is on PATH; the venv dir is deliberately not). End-to-end smoke run against a mock Anthropic messages server: daemon/server/runner/Claude CLI came up in ~60s, requests hit $PROXY_URL/v1/messages?beta=true (query string present; proxy must tolerate it), permissionMode=bypassPermissions, apiKeySource=apiKeyHelper, cwd=/work; ToolSearch -> mcp__omnigent__sys_os_write wrote hello.txt into the task cwd; final text printed; exit 0. Design notes: (1) claude-sdk was chosen over openai-agents because the openai-agents executor defaults to the OpenAI /responses endpoint which the proxy does not serve. (2) The bundled Claude CLI (claude-agent-sdk 0.2.94 platform wheels, ~70MB, no Node) is used because no system `claude` exists; on that path Omnigent disables the CLI's native Bash/Read/Write tools by design and routes file/shell work through its own sys_os_read/write/edit/shell MCP tools, which the CLI loads on demand through ToolSearch (so the first request carries only Skill+ToolSearch tools). (3) executor.auth must carry the key because the executor strips ANTHROPIC_API_KEY from the CLI's env and injects it via apiKeyHelper; ANTHROPIC_BASE_URL is inherited through Omnigent's env allowlists (no `base_url` in auth, which would enable the gateway shim/model-listing path). (4) IS_SANDBOX=1 is on Omnigent's runner env allowlist and is required for Claude Code to accept bypassPermissions as root. (5) `--log` is rejected together with `-p`, so trajectory artifacts are: stdout tee'd to /out/omnigent-run.log plus $OMNIGENT_DATA_DIR/logs/{cli,host,server,runner} (and debug/ when produced) copied to /out; the runner log contains the CLI init/system messages. (6) The CLI also issues small side calls (e.g. haiku title generation) through the same proxy; the proxy's model substitution covers them. (7) The web UI build is skipped at install (OMNIGENT_SKIP_WEB_UI=true) so no Node/pnpm is needed; the server serves an API-only landing page. (8) A persistent host daemon + local server on 127.0.0.1:6767 remain running after the one-shot; they die with the container. (9) The `omnigent-client`/`omnigent-ui-sdk` path deps under sdks/ are installed editable from /opt/harness/src via uv.lock (--frozen), which is why the whole repo is COPYed."
+}

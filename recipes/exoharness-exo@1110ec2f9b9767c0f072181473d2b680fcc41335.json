@@ -1,0 +1,60 @@
+{
+  "summary": "Exo is a self-improving agent harness: a Rust CLI binary (`exo`, crates/cli) that stores agents/conversations/secrets in a sqlite root (`--root`), and for `--harness exo` spawns a Node runner (`node --import tsx exoharness/typescript/harness/runner.ts exo/harness.ts`) with cwd = the repo checkout (TypeScriptHarness::exo_from_root uses std::env::current_dir()). Tool commands run through a sandbox backend; the `local-process` provider runs them directly in the container, using the requested absolute cwd when it exists (crates/exoharness/src/sandbox.rs resolve_local_workdir). Model calls are made in Rust via the braintrust lingua router (crates/executor/src/harness_runtime.rs): model names starting with `claude` route to the native Anthropic Messages API using the registered binding's base URL (or ANTHROPIC_BASE_URL) with the secret as x-api-key; other names route to the OpenAI Responses API, which the proxy does not offer, so a claude name is used. One task is run non-interactively with `exo conversation send <agent> <conversation> \"<prompt>\"`, and the trajectory is exported with `exo conversation events`.",
+  "base_image": "buildpack-deps:jammy",
+  "dockerfile": "ARG BASE=buildpack-deps:jammy\nFROM ${BASE}\n\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n      ca-certificates curl git xz-utils build-essential pkg-config cmake \\\n      clang libclang-dev libssl-dev \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Self-contained toolchains under /opt/harness: Node 22 (for the tsx harness runner) and a Rust toolchain (to build the exo CLI).\nENV RUSTUP_HOME=/opt/harness/rustup \\\n    CARGO_HOME=/opt/harness/cargo\n# PATH must include the node bin dir BEFORE npm is invoked: npm's shebang is `#!/usr/bin/env node`.\nENV PATH=/opt/harness/bin:/opt/harness/node/bin:/opt/harness/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n\nRUN mkdir -p /opt/harness/bin /opt/harness/node \\\n    && ARCH=\"$(uname -m)\" \\\n    && case \"$ARCH\" in x86_64) NARCH=x64 ;; aarch64|arm64) NARCH=arm64 ;; *) echo \"unsupported arch $ARCH\" && exit 1 ;; esac \\\n    && curl -fsSL \"https://nodejs.org/dist/v22.15.0/node-v22.15.0-linux-${NARCH}.tar.xz\" -o /tmp/node.tar.xz \\\n    && tar -xJf /tmp/node.tar.xz --strip-components=1 -C /opt/harness/node \\\n    && rm -f /tmp/node.tar.xz \\\n    && /opt/harness/node/bin/node --version\n\nRUN /opt/harness/node/bin/node /opt/harness/node/bin/npm install -g pnpm@10.26.2 \\\n    && /opt/harness/node/bin/pnpm --version\n\nRUN curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh \\\n    && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable --no-modify-path \\\n    && rm -f /tmp/rustup-init.sh \\\n    && /opt/harness/cargo/bin/cargo --version\n\n# Harness source (the TypeScript harness is executed from this checkout at run time).\nCOPY . /opt/harness/src\n\n# JS dependencies for the tsx runner (tsx, @braintrust/lingua, etc.). Scripts skipped: the root `prepare` hook needs a .git dir and no native builds are required.\nRUN cd /opt/harness/src && CI=true /opt/harness/node/bin/pnpm install --frozen-lockfile --ignore-scripts\n\n# Build the exo CLI and install it as the entrypoint; drop build artifacts afterwards.\nRUN cd /opt/harness/src \\\n    && /opt/harness/cargo/bin/cargo build --release -p exo --bin exo --ignore-rust-version \\\n    && cp target/release/exo /opt/harness/bin/exo \\\n    && rm -rf target /opt/harness/cargo/registry /opt/harness/cargo/git \\\n    && /opt/harness/bin/exo --help >/dev/null\n\n# Empty LiteLLM price table so cost tracking never tries to fetch from GitHub.\nRUN echo '{}' > /opt/harness/empty-prices.json\n\nENV EXO_LITELLM_PRICES_PATH=/opt/harness/empty-prices.json \\\n    EXO_SECRET_BACKEND=file \\\n    EXO_PROFILE=practical \\\n    EXO_REPO=/opt/harness/src \\\n    CI=true \\\n    NO_COLOR=1",
+  "run_command": "set -euo pipefail\nTASK_DIR=\"$PWD\"\nROOT=\"${EXO_ROOT:-/tmp/exo-root}\"\nMODEL=\"${EXO_MODEL:-claude-sonnet-4-5}\"\nmkdir -p \"$ROOT\" /out\nexport EXO_ROOT=\"$ROOT\"\nexport EXO_MASTER_KEY_PATH=\"${EXO_MASTER_KEY_PATH:-$ROOT/master.key}\"\n# The exo harness resolves its TypeScript runner relative to the process cwd, so the CLI itself runs from the checkout in a subshell; the agent's shell/tools run in the task directory via the mount below.\n(\n  cd /opt/harness/src\n  exo --root \"$ROOT\" secret set proxy --value \"${ANTHROPIC_API_KEY:-proxy}\"\n  exo --root \"$ROOT\" model register \"$MODEL\" --model \"$MODEL\" --secret proxy --base-url \"${ANTHROPIC_BASE_URL}\"\n  exo --root \"$ROOT\" --harness exo agent create \"Exo\" --slug harness --model \"$MODEL\" \\\n      --provider local-process --sandbox-scope agent --networking enabled \\\n      --module /opt/harness/src/exo/harness.ts --tool-creation enabled\n  exo --root \"$ROOT\" --harness exo agent mount add harness \"$TASK_DIR\" \"$TASK_DIR\" --rw\n  exo --root \"$ROOT\" --harness exo conversation create harness task --slug task\n  exo --root \"$ROOT\" --harness exo conversation send harness task \\\n      \"Your working directory is $TASK_DIR; all files you need to read or edit are there. Task: $TASK\" \\\n      | tee /out/exo-transcript.txt\n  status=${PIPESTATUS[0]}\n  exo --root \"$ROOT\" --harness exo conversation events harness task --limit 100000 > /out/exo-events.json || true\n  cp -r \"$ROOT\" /out/exo-root 2>/dev/null || true\n  exit \"$status\"\n)",
+  "check_command": "exo --help >/dev/null && exo agent --help >/dev/null && node --version && pnpm --version && test -f /opt/harness/src/node_modules/tsx/package.json && test -f /opt/harness/src/exoharness/typescript/harness/runner.ts && test -f /opt/harness/src/exo/harness.ts && echo OK",
+  "env": [
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "$PROXY_URL/v1/"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "EXO_MODEL",
+      "value": "claude-sonnet-4-5"
+    },
+    {
+      "name": "EXO_ROOT",
+      "value": "/tmp/exo-root"
+    },
+    {
+      "name": "EXO_MASTER_KEY_PATH",
+      "value": "/tmp/exo-root/master.key"
+    },
+    {
+      "name": "EXO_SECRET_BACKEND",
+      "value": "file"
+    },
+    {
+      "name": "EXO_PROFILE",
+      "value": "practical"
+    },
+    {
+      "name": "EXO_LITELLM_PRICES_PATH",
+      "value": "/opt/harness/empty-prices.json"
+    },
+    {
+      "name": "EXO_REPO",
+      "value": "/opt/harness/src"
+    },
+    {
+      "name": "CI",
+      "value": "true"
+    },
+    {
+      "name": "NO_COLOR",
+      "value": "1"
+    },
+    {
+      "name": "HOME",
+      "value": "/tmp"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Fix for the previous failure (exit 127 = command not found): the old single RUN step called `/opt/harness/node/bin/npm` before the ENV PATH line, and npm is a JS script with the shebang `#!/usr/bin/env node`, so `node` was not found. The overlay now sets PATH (with the node bin dir) BEFORE any RUN step, invokes npm explicitly through the node binary, and splits node/pnpm/rustup into separate RUN steps, each ending with a version check so any future failure is localized. cargo build adds --ignore-rust-version (as exo.sh does) so a stable toolchain slightly older than the declared rust-version 1.95 still builds. Why Anthropic: harness_runtime.rs routes `claude*` model names to the native Messages API (x-api-key header) with the binding base URL; every other name goes to the OpenAI Responses API, which the proxy does not implement (Chat Completions is only used when the base URL contains \"openrouter.ai\"). The Anthropic provider's default endpoint is https://api.anthropic.com/v1/ and appends \"messages\", so the base URL is $PROXY_URL/v1/. Secrets: EXO_SECRET_BACKEND=file with the master key created on first use at EXO_MASTER_KEY_PATH, so no keychain is needed. Sandbox: the `local-process` provider runs tool commands directly in the container; resolve_local_workdir maps a guest path to a mount's host path, or uses an existing absolute path directly, so mounting TASK_DIR onto itself makes the agent work in the task directory. The exo CLI is invoked from /opt/harness/src in a subshell because TypeScriptHarness::exo_from_root resolves the tsx runner and exo/adapters from std::env::current_dir(); the run command captures the task dir first and passes it as the mount and in the prompt. EXO_PROFILE=practical selects the harness profile (exo/profiles/index.ts). Cost tracking normally fetches the LiteLLM price JSON from GitHub; EXO_LITELLM_PRICES_PATH points at an empty file so it degrades to no cost data without network. Build: cmake/clang/libclang are installed because Cargo.lock includes aws-lc-sys and bindgen. pnpm install uses --ignore-scripts (pnpm 10 skips dependency build scripts anyway, and the root `prepare` hook script needs a .git dir). Fallback if the TypeScript harness misbehaves at run time: drop `--harness exo`, `--module`, and `--tool-creation` and use `--harness basic` (shell-only Rust executor, no Node)."
+}

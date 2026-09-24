@@ -1,0 +1,68 @@
+{
+  "summary": "mini-SWE-agent is a minimal Python SWE agent (package `mini-swe-agent`, src/minisweagent). Its CLI entrypoint is the `mini` console script (minisweagent.run.mini:app, typer), which builds a config from src/minisweagent/config/mini.yaml plus CLI flags, instantiates a LitellmModel (default model class), a LocalEnvironment (runs each bash action as a subprocess in the current working directory) and the InteractiveAgent, then loops: it calls litellm.completion() with a single `bash` function tool, executes the returned tool calls, feeds the JSON-rendered output back as tool messages, and stops when the model runs `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`. The model is chosen by MSWEA_MODEL_NAME (or -m); with an `openai/<name>` model name litellm speaks the OpenAI chat-completions API and honors OPENAI_BASE_URL/OPENAI_API_BASE and OPENAI_API_KEY (the config also passes model_kwargs.api_base explicitly). The trajectory (all messages, tool outputs, exit status) is written as JSON to the path given by -o.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\n\nARG DEBIAN_FRONTEND=noninteractive\nRUN apt-get update \\\n && apt-get install -y --no-install-recommends ca-certificates curl git \\\n && rm -rf /var/lib/apt/lists/*\n\n# Self-contained Python runtime + venv for the harness under /opt/harness (never touches the base image's python).\nENV UV_PYTHON_INSTALL_DIR=/opt/harness/python \\\n    UV_PYTHON_PREFERENCE=only-managed \\\n    UV_LINK_MODE=copy \\\n    UV_NO_CACHE=1\nCOPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /opt/harness/bin/\n\nCOPY . /opt/harness/src\nRUN /opt/harness/bin/uv python install 3.12 \\\n && /opt/harness/bin/uv venv --python 3.12 /opt/harness/venv \\\n && /opt/harness/bin/uv pip install --python /opt/harness/venv/bin/python /opt/harness/src \\\n && ln -s /opt/harness/venv/bin/mini /opt/harness/venv/bin/mini-swe-agent /opt/harness/venv/bin/mini-extra /opt/harness/bin/\n\n# Only /opt/harness/bin goes on PATH (mini, mini-extra, uv) so the agent's own `python`/`pip` still resolve to the task image's toolchain.\n# Debian's /etc/profile resets PATH for login shells (`bash -lc`), so also persist it via profile.d.\nENV PATH=/opt/harness/bin:$PATH \\\n    MSWEA_CONFIGURED=true \\\n    MSWEA_GLOBAL_CONFIG_DIR=/tmp/mini-swe-agent \\\n    MSWEA_COST_TRACKING=ignore_errors \\\n    LITELLM_LOCAL_MODEL_COST_MAP=True \\\n    PYTHONUNBUFFERED=1\nRUN printf 'export PATH=/opt/harness/bin:$PATH\\n' > /etc/profile.d/harness.sh\n",
+  "run_command": "mkdir -p /out && /opt/harness/bin/mini -c mini.yaml -c \"model.model_kwargs.api_base=$OPENAI_BASE_URL\" -y --exit-immediately -l 0 -t \"$TASK\" -o /out/mini.traj.json < /dev/null",
+  "check_command": "/opt/harness/bin/mini --help >/dev/null && /opt/harness/venv/bin/python -c \"import minisweagent, litellm; print(minisweagent.__version__)\"",
+  "env": [
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "OPENAI_API_BASE",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "MSWEA_MODEL_NAME",
+      "value": "openai/gpt-4o"
+    },
+    {
+      "name": "MSWEA_CONFIGURED",
+      "value": "true"
+    },
+    {
+      "name": "MSWEA_COST_TRACKING",
+      "value": "ignore_errors"
+    },
+    {
+      "name": "MSWEA_GLOBAL_CONFIG_DIR",
+      "value": "/tmp/mini-swe-agent"
+    },
+    {
+      "name": "LITELLM_LOCAL_MODEL_COST_MAP",
+      "value": "True"
+    },
+    {
+      "name": "LITELLM_TELEMETRY",
+      "value": "False"
+    },
+    {
+      "name": "DO_NOT_TRACK",
+      "value": "1"
+    },
+    {
+      "name": "HF_HUB_OFFLINE",
+      "value": "1"
+    },
+    {
+      "name": "PYTHONUNBUFFERED",
+      "value": "1"
+    },
+    {
+      "name": "NO_COLOR",
+      "value": "1"
+    },
+    {
+      "name": "TERM",
+      "value": "dumb"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "Verified locally with Docker: built the overlay on python:3.12-slim-bookworm and on buildpack-deps:jammy (the task image's parent), ran check_command and run_command under `bash -lc` with `--network none` against an in-container mock OpenAI server. Both images: check passes; the agent sent 2 POSTs to /v1/chat/completions with model gpt-4o, Authorization \"Bearer proxy\" and the bash tool; it created the file in the cwd; /out/mini.traj.json was written with exit_status Submitted; and `which python3` inside the agent's shell resolved to the base image's interpreter (not the harness venv). Flag rationale: `-c mini.yaml` must be passed explicitly because any -c replaces the default config; `model.model_kwargs.api_base=$OPENAI_BASE_URL` pins the base URL in addition to the env vars; `-y` (yolo) skips per-command confirmation; `--exit-immediately` skips the \"agent wants to finish\" prompt; `-l 0` disables the $3 cost limit, which litellm would otherwise compute against the fake gpt-4o price list and cut the run short; `< /dev/null` guarantees a non-tty stdin (the InteractiveAgent explicitly re-raises LimitsExceeded instead of prompting when stdin is not a tty). MSWEA_CONFIGURED=true suppresses the first-run setup wizard; MSWEA_COST_TRACKING=ignore_errors avoids the RuntimeError when cost lookup fails for the proxied model; MSWEA_GLOBAL_CONFIG_DIR keeps the harness's .env/history in /tmp; LITELLM_LOCAL_MODEL_COST_MAP=True stops litellm's import-time download of its price map. Model name openai/gpt-4o is a plain chat-completions model litellm accepts without special parameter handling; the proxy substitutes the real model (to use the Anthropic API instead, set MSWEA_MODEL_NAME=anthropic/claude-sonnet-4-5 with ANTHROPIC_BASE_URL/ANTHROPIC_API_BASE=$PROXY_URL and ANTHROPIC_API_KEY=proxy, and drop the api_base -c spec; note that path enables Anthropic cache_control markers). No step limit is set (mini.yaml default step_limit=0 = unlimited); add `-c agent.step_limit=N` to bound a run. Debian's /etc/profile resets PATH in login shells, so the Dockerfile adds /etc/profile.d/harness.sh and the commands use the absolute /opt/harness/bin/mini path. Only /opt/harness/bin (mini, mini-extra, uv) is on PATH, deliberately not the venv's bin, so the agent's python/pip commands hit the task image's toolchain. The \"Warning: Input is not a terminal (fd=0)\" line printed at startup is prompt_toolkit's harmless notice. Console output (the rendered conversation) goes to stdout; the full machine-readable trajectory is /out/mini.traj.json."
+}

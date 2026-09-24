@@ -1,0 +1,72 @@
+{
+  "summary": "QM (yc-software/qm) is a headless multiplayer agent core for Slack and web: a Node 24 TypeScript server (`node src/index.ts`, run directly without build) exposing an HTTP API whose `POST /v1/turns` runs one agent turn. The in-process Pi harness (HARNESS=pi, @earendil-works/pi-ai + pi-coding-agent) calls the model with the Anthropic SDK against `ANTHROPIC_BASE_URL` (SDK appends /v1/messages); PI_MODEL picks a catalog id such as claude-opus-5. Agent tools (execute/read/write) always run inside a Sandbox backend; the default \"local\" backend drives a Docker CLI named by LOCAL_SANDBOX_DOCKER_BIN and talks HTTP to the repo's exec daemon aws/microvm-agent/agent.mjs. There is no one-shot CLI (cli/bin/qm.ts is a deployment control-plane tool), so the run boots the core with in-memory stores and ALLOW_UNAUTHENTICATED_CORE=1, posts one turn with curl, prints the reply, and exits.",
+  "base_image": "buildpack-deps:jammy",
+  "dockerfile": "ARG BASE=buildpack-deps:jammy\nFROM ${BASE}\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git jq xz-utils util-linux procps && rm -rf /var/lib/apt/lists/*\nARG NODE_VERSION=24.18.0\nRUN set -eux; case \"$(uname -m)\" in x86_64) a=x64 ;; aarch64) a=arm64 ;; *) echo \"unsupported arch\" && exit 1 ;; esac; mkdir -p /opt/harness/node /opt/harness/bin; curl -fsSL \"https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${a}.tar.xz\" | tar -xJ -C /opt/harness/node --strip-components=1\nENV PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH\nCOPY . /opt/harness/src\nRUN cd /opt/harness/src && CI=true npm ci --no-audit --no-fund && CI=true npm run build:connector-sdk && rm -rf /root/.npm /tmp/node-compile-cache\nRUN echo 'IyEvb3B0L2hhcm5lc3Mvbm9kZS9iaW4vbm9kZQppbXBvcnQgeyBzcGF3biB9IGZyb20gIm5vZGU6Y2hpbGRfcHJvY2VzcyI7CmltcG9ydCB7IGV4aXN0c1N5bmMsIG1rZGlyU3luYywgb3BlblN5bmMsIHJlYWRGaWxlU3luYywgcm1TeW5jLCB3cml0ZUZpbGVTeW5jIH0gZnJvbSAibm9kZTpmcyI7CmltcG9ydCBuZXQgZnJvbSAibm9kZTpuZXQiOwppbXBvcnQgeyBqb2luIH0gZnJvbSAibm9kZTpwYXRoIjsKCmNvbnN0IHN0YXRlID0gcHJvY2Vzcy5lbnYuUU1fU0hJTV9TVEFURSB8fCAiL3RtcC9xbS1zYW5kYm94LXNoaW0iOwpjb25zdCBhZ2VudCA9IHByb2Nlc3MuZW52LlFNX1NISU1fQUdFTlQgfHwgIi9vcHQvaGFybmVzcy9zcmMvYXdzL21pY3Jvdm0tYWdlbnQvYWdlbnQubWpzIjsKY29uc3Qgd29ya2RpciA9IHByb2Nlc3MuZW52LlFNX1NISU1fV09SS0RJUiB8fCBwcm9jZXNzLmN3ZCgpOwpjb25zdCBpbWFnZUlkID0gInNoYTI1NjpxbS1zYW5kYm94LXNoaW0iOwpta2RpclN5bmMoc3RhdGUsIHsgcmVjdXJzaXZlOiB0cnVlIH0pOwoKY29uc3QgW2NtZCwgLi4ucmVzdF0gPSBwcm9jZXNzLmFyZ3Yuc2xpY2UoMik7CmNvbnN0IG91dCA9IChzKSA9PiBwcm9jZXNzLnN0ZG91dC53cml0ZShzKTsKY29uc3QgZmFpbCA9IChtc2cpID0+IHsKICBwcm9jZXNzLnN0ZGVyci53cml0ZShtc2cgKyAiXG4iKTsKICBwcm9jZXNzLmV4aXQoMSk7Cn07CmNvbnN0IHBpZEZpbGUgPSAobmFtZSkgPT4gam9pbihzdGF0ZSwgbmFtZSArICIucGlkIik7CmNvbnN0IHBvcnRGaWxlID0gKG5hbWUpID0+IGpvaW4oc3RhdGUsIG5hbWUgKyAiLnBvcnQiKTsKY29uc3Qgdm9sdW1lRmlsZSA9IChuYW1lKSA9PiBqb2luKHN0YXRlLCBuYW1lICsgIi52b2x1bWUiKTsKY29uc3QgcG9zaXRpb25hbCA9IChhcmdzKSA9PiBhcmdzLmZpbHRlcigoYSkgPT4gIWEuc3RhcnRzV2l0aCgiLSIpICYmICFhLnN0YXJ0c1dpdGgoInt7IikpOwpjb25zdCBhbGl2ZSA9IChwaWQpID0+IHsKICB0cnkgewogICAgcHJvY2Vzcy5raWxsKHBpZCwgMCk7CiAgICByZXR1cm4gdHJ1ZTsKICB9IGNhdGNoIHsKICAgIHJldHVybiBmYWxzZTsKICB9Cn07CmNvbnN0IHJlYWRQaWQgPSAobmFtZSkgPT4gKGV4aXN0c1N5bmMocGlkRmlsZShuYW1lKSkgPyBOdW1iZXIocmVhZEZpbGVTeW5jKHBpZEZpbGUobmFtZSksICJ1dGY4IikpIDogbnVsbCk7CmNvbnN0IGZyZWVQb3J0ID0gKCkgPT4KICBuZXcgUHJvbWlzZSgocmVzb2x2ZSwgcmVqZWN0KSA9PiB7CiAgICBjb25zdCBzcnYgPSBuZXQuY3JlYXRlU2VydmVyKCk7CiAgICBzcnYubGlzdGVuKDAsICIxMjcuMC4wLjEiLCAoKSA9PiB7CiAgICAgIGNvbnN0IHBvcnQgPSBzcnYuYWRkcmVzcygpLnBvcnQ7CiAgICAgIHNydi5jbG9zZSgoKSA9PiByZXNvbHZlKHBvcnQpKTsKICAgIH0pOwogICAgc3J2Lm9uKCJlcnJvciIsIHJlamVjdCk7CiAgfSk7Cgphc3luYyBmdW5jdGlvbiBzdGFydERhZW1vbihuYW1lKSB7CiAgY29uc3QgcGlkID0gcmVhZFBpZChuYW1lKTsKICBpZiAocGlkICYmIGFsaXZlKHBpZCkpIHJldHVybjsKICBjb25zdCBwb3J0ID0gZXhpc3RzU3luYyhwb3J0RmlsZShuYW1lKSkgPyBOdW1iZXIocmVhZEZpbGVTeW5jKHBvcnRGaWxlKG5hbWUpLCAidXRmOCIpKSA6IGF3YWl0IGZyZWVQb3J0KCk7CiAgd3JpdGVGaWxlU3luYyhwb3J0RmlsZShuYW1lKSwgU3RyaW5nKHBvcnQpKTsKICBjb25zdCBsb2cgPSBvcGVuU3luYyhqb2luKHN0YXRlLCBuYW1lICsgIi5sb2ciKSwgImEiKTsKICBjb25zdCBjaGlsZCA9IHNwYXduKHByb2Nlc3MuZXhlY1BhdGgsIFthZ2VudF0sIHsKICAgIGN3ZDogd29ya2RpciwKICAgIGVudjogeyAuLi5wcm9jZXNzLmVudiwgQUdFTlRfUE9SVDogU3RyaW5nKHBvcnQpIH0sCiAgICBkZXRhY2hlZDogdHJ1ZSwKICAgIHN0ZGlvOiBbImlnbm9yZSIsIGxvZywgbG9nXSwKICB9KTsKICBjaGlsZC51bnJlZigpOwogIHdyaXRlRmlsZVN5bmMocGlkRmlsZShuYW1lKSwgU3RyaW5nKGNoaWxkLnBpZCkpOwp9CgpmdW5jdGlvbiBzdG9wRGFlbW9uKG5hbWUpIHsKICBjb25zdCBwaWQgPSByZWFkUGlkKG5hbWUpOwogIGlmIChwaWQgJiYgYWxpdmUocGlkKSkgewogICAgdHJ5IHsKICAgICAgcHJvY2Vzcy5raWxsKC1waWQsICJTSUdLSUxMIik7CiAgICB9IGNhdGNoIHsKICAgICAgdHJ5IHsKICAgICAgICBwcm9jZXNzLmtpbGwocGlkLCAiU0lHS0lMTCIpOwogICAgICB9IGNhdGNoIHt9CiAgICB9CiAgfQogIHJtU3luYyhwaWRGaWxlKG5hbWUpLCB7IGZvcmNlOiB0cnVlIH0pOwp9Cgpzd2l0Y2ggKGNtZCkgewogIGNhc2UgInZlcnNpb24iOgogICAgb3V0KCJDbGllbnQ6IHFtLXNhbmRib3gtc2hpbVxuU2VydmVyOiBxbS1zYW5kYm94LXNoaW1cbiIpOwogICAgYnJlYWs7CiAgY2FzZSAiaW1hZ2UiOiB7CiAgICBjb25zdCBmbXQgPSByZXN0W3Jlc3QuaW5kZXhPZigiLWYiKSArIDFdIHx8ICIiOwogICAgb3V0KGZtdC5pbmNsdWRlcygiLklkIikgPyBpbWFnZUlkICsgIlxuIiA6ICJcbiIpOwogICAgYnJlYWs7CiAgfQogIGNhc2UgImluc3BlY3QiOiB7CiAgICBjb25zdCBuYW1lID0gcG9zaXRpb25hbChyZXN0KS5hdCgtMSk7CiAgICBjb25zdCBwaWQgPSByZWFkUGlkKG5hbWUpOwogICAgaWYgKHBpZCA9PT0gbnVsbCkgZmFpbCgiRXJyb3I6IE5vIHN1Y2ggb2JqZWN0OiAiICsgbmFtZSk7CiAgICBvdXQoKGFsaXZlKHBpZCkgPyAidHJ1ZSIgOiAiZmFsc2UiKSArICIgIiArIGltYWdlSWQgKyAiXG4iKTsKICAgIGJyZWFrOwogIH0KICBjYXNlICJwb3J0IjogewogICAgY29uc3QgbmFtZSA9IHBvc2l0aW9uYWwocmVzdClbMF07CiAgICBpZiAoIWV4aXN0c1N5bmMocG9ydEZpbGUobmFtZSkpKSBmYWlsKCJFcnJvcjogTm8gc3VjaCBjb250YWluZXI6ICIgKyBuYW1lKTsKICAgIG91dCgiMTI3LjAuMC4xOiIgKyByZWFkRmlsZVN5bmMocG9ydEZpbGUobmFtZSksICJ1dGY4IikudHJpbSgpICsgIlxuIik7CiAgICBicmVhazsKICB9CiAgY2FzZSAicnVuIjogewogICAgY29uc3QgbmFtZSA9IHJlc3RbcmVzdC5pbmRleE9mKCItLW5hbWUiKSArIDFdOwogICAgYXdhaXQgc3RhcnREYWVtb24obmFtZSk7CiAgICBvdXQobmFtZSArICJcbiIpOwogICAgYnJlYWs7CiAgfQogIGNhc2UgInN0YXJ0IjoKICAgIGF3YWl0IHN0YXJ0RGFlbW9uKHBvc2l0aW9uYWwocmVzdClbMF0pOwogICAgYnJlYWs7CiAgY2FzZSAicm0iOgogICAgc3RvcERhZW1vbihwb3NpdGlvbmFsKHJlc3QpWzBdKTsKICAgIGJyZWFrOwogIGNhc2UgInZvbHVtZSI6IHsKICAgIGNvbnN0IFthY3Rpb24sIG5hbWVdID0gcG9zaXRpb25hbChyZXN0KTsKICAgIGlmIChhY3Rpb24gPT09ICJpbnNwZWN0IiAmJiAhZXhpc3RzU3luYyh2b2x1bWVGaWxlKG5hbWUpKSkgZmFpbCgiRXJyb3I6IE5vIHN1Y2ggdm9sdW1lOiAiICsgbmFtZSk7CiAgICBpZiAoYWN0aW9uID09PSAiY3JlYXRlIikgd3JpdGVGaWxlU3luYyh2b2x1bWVGaWxlKG5hbWUpLCAiIik7CiAgICBpZiAoYWN0aW9uID09PSAicm0iKSBybVN5bmModm9sdW1lRmlsZShuYW1lKSwgeyBmb3JjZTogdHJ1ZSB9KTsKICAgIGJyZWFrOwogIH0KICBkZWZhdWx0OgogICAgYnJlYWs7Cn0K' | base64 -d > /opt/harness/bin/qm-docker && chmod +x /opt/harness/bin/qm-docker && node --check /opt/harness/bin/qm-docker\nENV HARNESS=pi SANDBOX_BACKEND=local LOCAL_SANDBOX_DOCKER_BIN=/opt/harness/bin/qm-docker LOCAL_SANDBOX_IMAGE=qm-sandbox-shim\nRUN mkdir -p /out /work\n",
+  "run_command": "set -euo pipefail\nexport QM_SHIM_WORKDIR=\"$PWD\" QM_SHIM_STATE=/tmp/qm-sandbox-shim\nmkdir -p /out \"${DATA_DIR:-/out/qm-data}\" /root\nif [ -L /root/workspace ]; then rm -f /root/workspace; elif [ -d /root/workspace ]; then rmdir /root/workspace; fi\nln -s \"$PWD\" /root/workspace\nnode /opt/harness/src/src/index.ts > /out/qm-core.log 2>&1 &\nCORE_PID=$!\ntrap 'kill $CORE_PID 2>/dev/null; pkill -KILL -f microvm-agent/agent.mjs 2>/dev/null; true' EXIT\nfor _ in $(seq 1 120); do curl -sf \"http://127.0.0.1:${PORT:-48080}/healthz\" >/dev/null 2>&1 && break; kill -0 $CORE_PID 2>/dev/null || { cat /out/qm-core.log; exit 1; }; sleep 1; done\njq -n --arg text \"$TASK\" '{surface:\"cli\",actor:{externalId:\"operator\"},conversation:{kind:\"dm\",threadRef:\"task-1\"},text:$text}' > /out/qm-turn-request.json\ncurl -s -X POST \"http://127.0.0.1:${PORT:-48080}/v1/turns\" -H 'content-type: application/json' --data-binary @/out/qm-turn-request.json > /out/qm-turn-result.json\njq -r '.reply // .reason // .' /out/qm-turn-result.json\njq -e '.status == \"ok\"' /out/qm-turn-result.json >/dev/null",
+  "check_command": "node /opt/harness/src/cli/bin/qm.ts --help >/dev/null && /opt/harness/bin/qm-docker version && test -f /opt/harness/src/.generated/connector-sdk/sdk.cjs && test -d /opt/harness/src/node_modules/@earendil-works/pi-coding-agent && echo qm-install-ok",
+  "env": [
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "PI_MODEL",
+      "value": "claude-opus-5"
+    },
+    {
+      "name": "HARNESS",
+      "value": "pi"
+    },
+    {
+      "name": "SANDBOX_BACKEND",
+      "value": "local"
+    },
+    {
+      "name": "LOCAL_SANDBOX_DOCKER_BIN",
+      "value": "/opt/harness/bin/qm-docker"
+    },
+    {
+      "name": "LOCAL_SANDBOX_IMAGE",
+      "value": "qm-sandbox-shim"
+    },
+    {
+      "name": "ALLOW_UNAUTHENTICATED_CORE",
+      "value": "1"
+    },
+    {
+      "name": "SESSION_STORE",
+      "value": "memory"
+    },
+    {
+      "name": "RUN_STORE",
+      "value": "memory"
+    },
+    {
+      "name": "PORT",
+      "value": "48080"
+    },
+    {
+      "name": "DATA_DIR",
+      "value": "/out/qm-data"
+    },
+    {
+      "name": "SUGGESTED_ACTIVITIES_ENABLED",
+      "value": "false"
+    },
+    {
+      "name": "MEMORY_CAPTURE",
+      "value": "off"
+    },
+    {
+      "name": "CI",
+      "value": "true"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Verified locally: the overlay was built FROM buildpack-deps:jammy and a run inside it (fake Anthropic messages server standing in for the proxy) created a file in the task cwd via the execute tool and returned status ok; auxiliary calls (title/detect model claude-haiku-4-5) also go through the proxy. Design: QM has no single-task CLI, so the run boots the core (node src/index.ts, its real entrypoint) and posts one dm turn to POST /v1/turns; no Postgres, Slack, or cloud credentials are needed with memory stores. The execute/read/write tools only run inside a Sandbox backend and every backend is remote or Docker-based, so /opt/harness/bin/qm-docker is a tiny Docker-CLI emulator (an explicit LOCAL_SANDBOX_DOCKER_BIN knob, harness untouched) that starts the repo's own exec daemon aws/microvm-agent/agent.mjs on a free localhost port with cwd = task dir; the local backend hard-codes /root/workspace as the workspace, so the run symlinks it to $PWD (it aborts if /root/workspace is a non-empty directory). Outputs under /out: qm-core.log, qm-turn-request.json, qm-turn-result.json (status, sessionId, reply) and qm-data/. The default security posture keeps QM's command policy: destructive commands (rm -rf, destructive SQL) pause for human approval, which a non-interactive run cannot grant, so such turns end with pending_approval/refused. Provisioning also creates credential symlinks under /root/.aws, /root/.netrc, /root/.config/gh pointing at /tmp/agent-creds, and a .agent-turn dir may appear in the workspace when attachments are used. Any model name is fine since the proxy substitutes it; claude-opus-5 is a built-in catalog id so Pi accepts it without verification."
+}

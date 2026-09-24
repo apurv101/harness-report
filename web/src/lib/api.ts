@@ -1,6 +1,6 @@
-import type { GithubRepo, Installation, RepoOption, RunBundle, RunSummary, Session } from './types'
+import type { EvalState, GithubRepo, Installation, RepoOption, RunBundle, RunSummary, Session } from './types'
 
-/** Every read the frontend makes.  serve.py answers all of them; the static site answers none. */
+/** Every call the frontend makes.  serve.py answers all of them; the static site answers none. */
 async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, { headers: { Accept: 'application/json' }, signal })
   if (!response.ok) {
@@ -38,3 +38,26 @@ export async function getUserRepos(signal?: AbortSignal): Promise<RepoOption[]> 
 /** A file inside a run folder, served as-is. */
 export const rawFileURL = (runId: string, name: string) =>
   `/raw/${encodeURIComponent(runId)}/${name.split('/').map(encodeURIComponent).join('/')}`
+
+async function postJSON<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error((data as { error?: string }).error || response.statusText)
+  return data as T
+}
+
+/** Start run.sh on this repository and the bowling task.  Fails with a message while another one runs. */
+export const startEval = (repo: string) => postJSON<EvalState>('/api/evals', { repo })
+
+/** The evaluation running on this machine now, or null. */
+export const getCurrentEval = (signal?: AbortSignal) => getJSON<EvalState | null>('/api/evals/current', signal)
+
+/** One evaluation, with run.sh's events from `after` on. */
+export const getEval = (id: string, after = 0, signal?: AbortSignal) =>
+  getJSON<EvalState>(`/api/evals/${encodeURIComponent(id)}?after=${after}`, signal)
+
+export const cancelEval = (id: string) => postJSON<{ cancelled: boolean }>(`/api/evals/${encodeURIComponent(id)}/cancel`, {})

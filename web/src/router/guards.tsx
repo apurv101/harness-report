@@ -15,10 +15,10 @@ export function RequireRepo({ children }: { children: ReactElement }) {
 }
 
 export function RequireResult({ children }: { children: ReactElement }) {
-  const { signedIn, repo, result } = usePreview()
+  const { signedIn, repo, result, evalId } = usePreview()
   if (!signedIn) return <Navigate to="/connect" replace />
   if (!repo) return <Navigate to="/import" replace />
-  return result === 'example-passed' ? children : <Navigate to="/check" replace />
+  return result === 'example-passed' || evalId ? children : <Navigate to="/check" replace />
 }
 
 /** Signing in again once you are signed in just means continuing. */

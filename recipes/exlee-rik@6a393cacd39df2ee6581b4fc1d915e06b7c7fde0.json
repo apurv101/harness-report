@@ -1,0 +1,36 @@
+{
+  "summary": "rik (exlee/rik 0.6.0) is a Rust CLI \"marker completion\" agent: you drop `rik: <instruction>` markers (or multi-line `rik: [[[ ... ]]]` blocks) into files, run `rik --once <pattern>`, and it runs a rig-core multi-turn tool-using agent (read_file, edit_file on the marker's own file, write_file for new files, list_files, send_message, skill, recall, plus file-declared dynamic command tools) that replaces the marker with real content. The entrypoint is the `rik` binary (src/main.rs, clap). Model access is configured only through ~/.config/rik/rik.toml ([model] provider/url/api_key/model); with provider = \"openaicompatible\" it builds rig's OpenAI CompletionsClient and streams chat completions (SSE, tool calling) to `{url}/chat/completions`, so url = \"$PROXY_URL/v1\". The run command generates that config from $PROXY_URL at run time, writes the task into a RIK_TASK.md marker block in the task directory (with a `rik +tool` shell tool so the agent can edit/test any project file), runs `rik --once -v --no-ignore RIK_TASK.md` with stdin closed, and tees the verbose trajectory to /out/rik.log.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n      ca-certificates curl git build-essential cmake pkg-config diffutils \\\n    && rm -rf /var/lib/apt/lists/*\nCOPY . /opt/harness/src\nENV RUSTUP_HOME=/opt/harness/rustup CARGO_HOME=/opt/harness/cargo\nRUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path \\\n    && /opt/harness/cargo/bin/cargo build --release --locked --manifest-path /opt/harness/src/Cargo.toml \\\n    && mkdir -p /opt/harness/bin \\\n    && cp /opt/harness/src/target/release/rik /opt/harness/bin/rik \\\n    && rm -rf /opt/harness/src/target /opt/harness/cargo /opt/harness/rustup\nRUN ln -sf /opt/harness/bin/rik /usr/local/bin/rik \\\n    && printf 'export PATH=/opt/harness/bin:$PATH\\n' > /etc/profile.d/harness.sh\nENV PATH=/opt/harness/bin:$PATH\n",
+  "run_command": "mkdir -p \"${HOME:-/root}/.config/rik\" /out && printf '%s\\n' 'edition-constraints = \"none\"' 'memory-tokens = 0' '[model]' 'provider = \"openaicompatible\"' \"url = \\\"${PROXY_URL}/v1\\\"\" \"api_key = \\\"${OPENAI_API_KEY:-proxy}\\\"\" \"model = \\\"${RIK_MODEL:-gpt-4o}\\\"\" > \"${HOME:-/root}/.config/rik/rik.toml\" && { printf '%s\\n' 'rik +tool (run a shell command from the project root; use it to inspect, edit, and test any file in the project): bash -c <command>' 'rik: [[['; printf '%s\\n' \"$TASK\"; printf '%s\\n' '' 'Complete the task above inside the current project directory. Use the shell tool to modify or test existing files and write_file to create new ones. When finished, replace this marker with a short summary of what you did.' ']]]'; } > RIK_TASK.md && rik --once -v --no-ignore RIK_TASK.md </dev/null 2>&1 | tee /out/rik.log; status=${PIPESTATUS[0]}; cp RIK_TASK.md /out/RIK_TASK.md 2>/dev/null; exit \"$status\"",
+  "check_command": "rik --help",
+  "env": [
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "RIK_MODEL",
+      "value": "gpt-4o"
+    },
+    {
+      "name": "TERM",
+      "value": "dumb"
+    },
+    {
+      "name": "NO_COLOR",
+      "value": "1"
+    },
+    {
+      "name": "RUST_LOG",
+      "value": "warn"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "Verified locally with Docker (arm64): the overlay built on python:3.12-slim-bookworm and on buildpack-deps:jammy; `bash -lc 'rik --help'` passes on both; a smoke run against a fake OpenAI endpoint showed rik streaming POST /v1/chat/completions with Authorization \"Bearer proxy\", model \"gpt-4o\", stream=true, and tools [read_file, edit_file, send_message, list_files, write_file, skill, recall, D1] where D1 is the shell tool declared in RIK_TASK.md, then exiting with stdin closed. Exit code is rik's own: it exited 1 in the smoke test only because the stub model made no edit (\"Task marker ... left unchanged\"); a stream/HTTP error is printed and the marker file reverted, yet rik exits 0 in that case.\n\nModel routing: rik has no env var for base URL or model; both come only from ~/.config/rik/rik.toml (src/config.rs find_config_path reads $HOME/.config/rik/rik.toml first), so the run command writes that file at run time with provider = \"openaicompatible\", url = \"$PROXY_URL/v1\" (rig-core 0.40 OpenAI client posts to {base_url}/chat/completions), api_key from OPENAI_API_KEY (any string), and model from RIK_MODEL (any name). OPENAI_BASE_URL in env is informational only. Anthropic would also work (provider = \"anthropic\", url = \"$PROXY_URL\"; rig posts to /v1/messages).\n\nTask delivery: rik only acts on markers in files, so the run command creates RIK_TASK.md in the task directory with a `rik: [[[ ... ]]]` block holding $TASK plus a trailing instruction line (guarantees the query does not end with \"?\", which would switch rik to read-only question mode). rik's built-in edit_file can only modify the file that holds the marker and write_file only creates new files, so the task file also declares rik's documented dynamic tool `rik +tool (...): bash -c <command>`, giving the agent a shell to edit and test other project files; without it rik cannot change existing files. edition-constraints = \"none\" disables the marker-vicinity edit restore; memory-tokens = 0 disables session memory (single task, saves one model call). Verbose (-v) output is teed to /out/rik.log and the final RIK_TASK.md is copied to /out. --no-ignore ensures the task file is scanned even if a .gitignore would exclude it. --once mode has no keyboard listener; stdin is /dev/null.\n\nBuild: rik needs Rust 1.93+ (edition 2024); rustup minimal is installed under /opt/harness, built with --locked, binary copied to /opt/harness/bin/rik, toolchain and caches removed. TLS is rustls/aws-lc-sys, so build-essential and cmake are installed (no OpenSSL). Debian/Ubuntu /etc/profile resets PATH under `bash -lc`, so the Dockerfile also symlinks rik into /usr/local/bin and adds /etc/profile.d/harness.sh. diffutils is installed so rik can print diffs via `which diff`."
+}

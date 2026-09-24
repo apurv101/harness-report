@@ -1,0 +1,40 @@
+{
+  "summary": "Roo Code is a VS Code coding-agent extension; the repo also ships a standalone CLI (apps/cli, binary name `roo`) that loads the built extension bundle (src/dist/extension.js) through a VS Code API shim and drives the same agent loop from the terminal. Non-interactive use is `roo --print \"<prompt>\"` with `--workspace` pointing at the task directory; in print mode all tools, commands and edits are auto-approved and the process exits when the task completes. Provider/model come from `--provider` and `--model` flags (only anthropic, openai-native, gemini, openrouter, vercel-ai-gateway are accepted) and the API key from the provider's env var. The Anthropic provider constructs `new Anthropic({ baseURL: anthropicBaseUrl || undefined, apiKey })`, so with no base URL configured the SDK (0.37.0) falls back to ANTHROPIC_BASE_URL, which routes every call to $PROXY_URL/v1/messages (streaming, native tool calling). openai-native is not usable because it speaks the Responses API, not chat completions.",
+  "base_image": "buildpack-deps:bookworm",
+  "dockerfile": "ARG BASE=buildpack-deps:bookworm\nFROM ${BASE}\n\nARG NODE_VERSION=20.19.2\nARG PNPM_VERSION=10.8.1\nENV DEBIAN_FRONTEND=noninteractive\n\nRUN apt-get update \\\n && apt-get install -y --no-install-recommends ca-certificates curl git xz-utils bash \\\n && rm -rf /var/lib/apt/lists/*\n\n# Self-contained Node runtime under /opt/harness/node (never touches the base image's node/python).\nRUN set -eux; \\\n    case \"$(uname -m)\" in x86_64) a=x64 ;; aarch64|arm64) a=arm64 ;; *) echo \"unsupported arch\"; exit 1 ;; esac; \\\n    mkdir -p /opt/harness/node /opt/harness/bin /out /work; \\\n    curl -fsSL \"https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${a}.tar.xz\" \\\n      | tar -xJ --strip-components=1 -C /opt/harness/node\nENV PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH\nRUN npm install -g \"pnpm@${PNPM_VERSION}\"\n\n# Harness source (monorepo). Only the CLI (apps/cli) and the extension bundle (src) are built.\nCOPY . /opt/harness/src\nENV HUSKY=0 CI=1\nRUN cd /opt/harness/src \\\n && pnpm install --frozen-lockfile --filter \"roo-cline...\" --filter \"@roo-code/cli...\" \\\n && pnpm --filter @roo-code/types build \\\n && pnpm --filter @roo-code/build build \\\n && pnpm --filter roo-cline bundle \\\n && pnpm --filter @roo-code/cli build \\\n && pnpm store prune\n\n# Thin launcher: the CLI auto-detects the extension bundle at ../../src/dist and ripgrep under apps/cli/node_modules.\nRUN printf '%s\\n' '#!/bin/sh' \\\n      'export ROO_CLI_ROOT=/opt/harness/src/apps/cli' \\\n      'export ROO_EXTENSION_PATH=/opt/harness/src/src/dist' \\\n      'exec /opt/harness/node/bin/node /opt/harness/src/apps/cli/dist/index.js \"$@\"' \\\n      > /opt/harness/bin/roo \\\n && chmod +x /opt/harness/bin/roo \\\n && ln -sf /opt/harness/bin/roo /usr/local/bin/roo \\\n && printf '%s\\n' 'export PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH' > /etc/profile.d/harness.sh\n",
+  "run_command": "mkdir -p /out; roo --print --provider anthropic --model \"${ROO_MODEL:-claude-sonnet-4-5}\" --workspace \"$PWD\" \"$TASK\" </dev/null 2>&1 | tee /out/roo-output.txt; rc=${PIPESTATUS[0]}; cp -r \"$HOME/.vscode-mock/global-storage/tasks\" /out/tasks 2>/dev/null; cp \"$HOME/.roo/cli-debug.log\" /out/ 2>/dev/null; exit $rc",
+  "check_command": "roo --help >/dev/null && roo --version && test -f /opt/harness/src/src/dist/extension.js && test -x /opt/harness/src/apps/cli/node_modules/@vscode/ripgrep/bin/rg",
+  "env": [
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "ROO_MODEL",
+      "value": "claude-sonnet-4-5"
+    },
+    {
+      "name": "CI",
+      "value": "1"
+    },
+    {
+      "name": "FORCE_COLOR",
+      "value": "0"
+    },
+    {
+      "name": "NO_COLOR",
+      "value": "1"
+    },
+    {
+      "name": "DO_NOT_TRACK",
+      "value": "1"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Verified locally with Docker: the overlay builds on buildpack-deps:bookworm and on the given buildpack-deps:jammy/python3.11 task image; the check command passes under `bash -lc` on both; a smoke run against a fake Anthropic-messages server created the requested file in the mounted workspace, exited 0, and left roo-output.txt plus tasks/<id>/{api_conversation_history,ui_messages,task_metadata}.json under /out. Details: (1) Model must be a key of anthropicModels in packages/types (claude-sonnet-4-5, claude-opus-4-6, claude-haiku-4-5-20251001, ...); unknown IDs silently fall back to the default. The proxy replaces the name anyway. (2) The CLI has no base-URL flag; routing works because the Anthropic SDK reads ANTHROPIC_BASE_URL when the handler passes baseURL undefined. Requests go to $PROXY_URL/v1/messages with stream:true and native tools. (3) The default reasoning effort is \"medium\", which sends an Anthropic `thinking` budget for models that support it; pass `-r disabled` in run_command if the far-side model rejects that. (4) API errors auto-retry with exponential backoff indefinitely in print mode; add `--exit-on-error` to fail fast instead. Follow-up questions auto-select the first suggestion (stdin is /dev/null). (5) Login shells reset PATH from /etc/profile, hence the /etc/profile.d entry and the /usr/local/bin symlink in addition to ENV PATH. (6) HUSKY=0 skips git-hook install during pnpm install (no .git in the context); the .dockerignore in the repo drops tests, dist, .env and apps/* except apps/cli, which is compatible with this build. pnpm install is filtered to the extension and CLI workspaces so the webview, docs and e2e apps are not installed. (7) State persists under $HOME/.vscode-mock and $HOME/.roo inside the container; --ephemeral would delete the trajectory, so it is not used. (8) Startup may attempt a few outbound fetches (model lists for router providers, Roo Cloud, MCP marketplace); they fail silently and do not block the task."
+}

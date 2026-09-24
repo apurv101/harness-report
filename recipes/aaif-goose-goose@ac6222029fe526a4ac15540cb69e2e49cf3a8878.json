@@ -1,0 +1,52 @@
+{
+  "summary": "goose is a Rust AI-agent framework whose CLI binary `goose` (crate `goose-cli`, entry `crates/goose-cli/src/main.rs`) runs a single headless task with `goose run --text \"<prompt>\"` and exits when the agent finishes. Provider and model come from `GOOSE_PROVIDER` / `GOOSE_MODEL` env vars (read before any config.yaml, so no config file or wizard is needed); the Anthropic provider (`crates/goose-providers/src/anthropic.rs`) POSTs streaming requests to `${ANTHROPIC_HOST}/v1/messages` with `ANTHROPIC_API_KEY`, so pointing `ANTHROPIC_HOST` at the proxy routes every model call through it. Tool calls are auto-approved with `GOOSE_MODE=auto`; the `developer` (shell/file editing) and `todo` extensions are enabled on the command line with `--with-builtin developer,todo` since an absent config.yaml yields no extensions. `GOOSE_PATH_ROOT` relocates config, the sqlite session store (`data/sessions.db`) and tracing logs (`state/logs/cli/<date>/`) under /out. The binary is built from the copied source with the CI-tested `--no-default-features --features portable-default` set, which drops the V8/llama.cpp local-inference, D-Bus keyring and self-update features so no extra system libraries are needed at build or run time.",
+  "base_image": "python:3.12-slim-bookworm",
+  "dockerfile": "ARG BASE=python:3.12-slim-bookworm\nFROM ${BASE}\n\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n      ca-certificates curl git bash \\\n      build-essential pkg-config cmake \\\n      libxcb1 libgomp1 \\\n    && rm -rf /var/lib/apt/lists/*\n\nENV RUSTUP_HOME=/opt/harness/rustup \\\n    CARGO_HOME=/opt/harness/cargo \\\n    CARGO_NET_RETRY=10 \\\n    CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse\n\nRUN mkdir -p /opt/harness/bin && \\\n    curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \\\n      | sh -s -- -y --default-toolchain none --profile minimal --no-modify-path\n\nCOPY . /opt/harness/src\n\nRUN cd /opt/harness/src && \\\n    CHANNEL=\"$(sed -n 's/^channel *= *\"\\(.*\\)\"/\\1/p' rust-toolchain.toml)\" && \\\n    /opt/harness/cargo/bin/rustup toolchain install \"$CHANNEL\" --profile minimal --no-self-update && \\\n    /opt/harness/cargo/bin/cargo build --release -p goose-cli --bin goose \\\n      --no-default-features --features portable-default && \\\n    install -m 0755 target/release/goose /opt/harness/bin/goose && \\\n    rm -rf target /opt/harness/rustup /opt/harness/cargo\n\nENV PATH=/opt/harness/bin:$PATH\n",
+  "run_command": "export GOOSE_PATH_ROOT=\"${GOOSE_PATH_ROOT:-/out/goose}\"; mkdir -p \"$GOOSE_PATH_ROOT\" 2>/dev/null || { export GOOSE_PATH_ROOT=/tmp/goose-home; mkdir -p \"$GOOSE_PATH_ROOT\"; }; set -o pipefail; goose run --text \"$TASK\" --with-builtin developer,todo 2>&1 | tee \"$GOOSE_PATH_ROOT/run.log\"",
+  "check_command": "GOOSE_PATH_ROOT=/tmp/goose-check goose --version && GOOSE_PATH_ROOT=/tmp/goose-check goose run --help >/dev/null",
+  "env": [
+    {
+      "name": "GOOSE_PROVIDER",
+      "value": "anthropic"
+    },
+    {
+      "name": "GOOSE_MODEL",
+      "value": "claude-sonnet-4-6"
+    },
+    {
+      "name": "ANTHROPIC_HOST",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "GOOSE_MODE",
+      "value": "auto"
+    },
+    {
+      "name": "GOOSE_PATH_ROOT",
+      "value": "/out/goose"
+    },
+    {
+      "name": "GOOSE_TELEMETRY_OFF",
+      "value": "true"
+    },
+    {
+      "name": "GOOSE_TELEMETRY_ENABLED",
+      "value": "false"
+    },
+    {
+      "name": "GOOSE_DISABLE_KEYRING",
+      "value": "true"
+    },
+    {
+      "name": "NO_COLOR",
+      "value": "1"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "Build: compiling the goose workspace from source in release mode is heavy (expect 20-40+ minutes and several GB of scratch space); the toolchain pinned in rust-toolchain.toml (1.96.1) is installed with the minimal profile, then the rustup/cargo dirs and target/ are deleted to shrink the image. The feature set `--no-default-features --features portable-default` is the one the repo's own CI uses for portable Linux builds; it excludes local-inference (V8/llama.cpp, needs libclang/cmake-heavy builds), system-keyring (D-Bus), code-mode (V8) and the self-updater, none of which matter for headless tasks. cmake is installed only as a safety net for aws-lc-sys (rustls backend). The repo's .dockerignore applies to the build context (drops .git, target, .github, ui build output); nothing the Rust build embeds is excluded.\n\nRuntime: `goose run --text` is non-interactive by default (no `--interactive`), the telemetry consent dialog is skipped for non-interactive runs and additionally disabled via GOOSE_TELEMETRY_OFF, and GOOSE_MODE=auto auto-approves tool calls. With no config.yaml goose loads zero extensions, so `--with-builtin developer,todo` is required for shell/file tools. Session transcript (sqlite `data/sessions.db`), tracing logs (`state/logs/cli/<date>/`), and the tee'd stdout (`run.log`) land under /out/goose; if /out is not writable the run falls back to /tmp/goose-home. Add `--max-turns N` to the run command to bound agent iterations (default 1000).\n\nOpenAI alternative (api_style openai): GOOSE_PROVIDER=openai, OPENAI_HOST=$PROXY_URL, OPENAI_BASE_PATH=v1/chat/completions, OPENAI_API_KEY=proxy, GOOSE_MODEL=gpt-4o. Avoid model names matching gpt-5*/o-series with the default base path, since goose then switches to the Responses API endpoint (/v1/responses) which the proxy does not serve; an explicit OPENAI_BASE_PATH containing chat/completions forces chat completions regardless of model name."
+}

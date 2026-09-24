@@ -1,0 +1,52 @@
+{
+  "summary": "Gemini CLI (@google/gemini-cli) is a TypeScript/Node 20 agent. Its entrypoint is packages/cli/dist/index.js, exposed as the `gemini` binary; `-p` runs it headless. It only speaks the Google Gemini API, through @google/genai (packages/core/src/core/contentGenerator.ts); there is no OpenAI or Anthropic backend. The base URL can be changed with GOOGLE_GEMINI_BASE_URL, and the key comes from GEMINI_API_KEY. To reach the OpenAI-compatible recording proxy, the overlay also installs LiteLLM in its own self-contained Python 3.12 under /opt/harness. At run time LiteLLM starts on 127.0.0.1:4000 and serves the Gemini-native endpoints (/v1beta/models/{m}:streamGenerateContent). It translates each request into a streaming OpenAI chat-completions call, with tools, to $PROXY_URL/v1 through a wildcard 'openai/*' route. The Gemini CLI itself is built from the repo source with a bundled Node 20 and is not modified. The auth type (gemini-api-key), telemetry off, usage stats off, auto-update off and folder trust off are all set in a system settings file. Tested end to end on buildpack-deps:jammy with a mock OpenAI server: the model's streamed write_file tool call ran, the file was created in the task directory, the tool result was sent back as a role=tool message, and the run exited 0.",
+  "base_image": "buildpack-deps:jammy",
+  "dockerfile": "ARG BASE=buildpack-deps:jammy\nFROM ${BASE}\n\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git xz-utils ripgrep \\\n    && rm -rf /var/lib/apt/lists/*\n\n# Self-contained Node 20 runtime for gemini-cli\nARG NODE_VERSION=20.19.5\nRUN set -eux; arch=\"$(dpkg --print-architecture)\"; \\\n    case \"$arch\" in amd64) narch=x64;; arm64) narch=arm64;; *) echo \"unsupported arch $arch\"; exit 1;; esac; \\\n    mkdir -p /opt/harness/node /opt/harness/bin; \\\n    curl -fsSL \"https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${narch}.tar.xz\" \\\n      | tar -xJ -C /opt/harness/node --strip-components=1\n\n# Self-contained Python + LiteLLM: translates Gemini API (generateContent) -> OpenAI chat completions at $PROXY_URL\nENV UV_INSTALL_DIR=/opt/harness/uv \\\n    UV_PYTHON_INSTALL_DIR=/opt/harness/python \\\n    UV_TOOL_DIR=/opt/harness/uv-tools \\\n    UV_TOOL_BIN_DIR=/opt/harness/bin \\\n    UV_CACHE_DIR=/tmp/uv-cache\nRUN curl -LsSf https://astral.sh/uv/install.sh | sh \\\n    && /opt/harness/uv/uv python install 3.12 \\\n    && /opt/harness/uv/uv tool install --python 3.12 'litellm[proxy]' \\\n    && rm -rf /tmp/uv-cache \\\n    && /opt/harness/bin/litellm --help >/dev/null\n\n# Build gemini-cli from source\nCOPY . /opt/harness/src\nRUN set -eux; export PATH=/opt/harness/node/bin:$PATH; cd /opt/harness/src; \\\n    HUSKY=0 npm ci --ignore-scripts; \\\n    GIT_COMMIT=unknown HUSKY=0 npm run build; \\\n    npm cache clean --force\n\nRUN printf '%s\\n' '#!/bin/sh' 'exec /opt/harness/node/bin/node /opt/harness/src/packages/cli/dist/index.js \"$@\"' > /opt/harness/bin/gemini \\\n    && chmod +x /opt/harness/bin/gemini\n\nRUN printf '%s\\n' \\\n    'model_list:' \\\n    '  - model_name: \"*\"' \\\n    '    litellm_params:' \\\n    '      model: \"openai/*\"' \\\n    '      api_base: os.environ/OPENAI_BASE_URL' \\\n    '      api_key: os.environ/OPENAI_API_KEY' \\\n    'litellm_settings:' \\\n    '  drop_params: true' \\\n    > /opt/harness/litellm.yaml\n\nRUN printf '%s\\n' '{' \\\n    '  \"security\": { \"auth\": { \"selectedType\": \"gemini-api-key\" }, \"folderTrust\": { \"enabled\": false } },' \\\n    '  \"privacy\": { \"usageStatisticsEnabled\": false },' \\\n    '  \"telemetry\": { \"enabled\": false },' \\\n    '  \"general\": { \"enableAutoUpdate\": false, \"enableAutoUpdateNotification\": false }' \\\n    '}' > /opt/harness/gemini-system-settings.json\n\nENV PATH=/opt/harness/bin:$PATH\n",
+  "run_command": "mkdir -p /out/gemini-home; litellm --config /opt/harness/litellm.yaml --host 127.0.0.1 --port 4000 > /out/litellm.log 2>&1 & LPID=$!; for i in $(seq 1 180); do curl -sf http://127.0.0.1:4000/health/liveliness >/dev/null && break; sleep 1; done; gemini -p \"$TASK\" -m gemini-2.5-pro --yolo --skip-trust -o stream-json 2>&1 | tee /out/gemini-stream.jsonl; rc=${PIPESTATUS[0]}; kill $LPID 2>/dev/null; exit $rc",
+  "check_command": "gemini --version && litellm --help >/dev/null && echo ok",
+  "env": [
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "GEMINI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "GOOGLE_GEMINI_BASE_URL",
+      "value": "http://127.0.0.1:4000"
+    },
+    {
+      "name": "GEMINI_MODEL",
+      "value": "gemini-2.5-pro"
+    },
+    {
+      "name": "GEMINI_CLI_SYSTEM_SETTINGS_PATH",
+      "value": "/opt/harness/gemini-system-settings.json"
+    },
+    {
+      "name": "GEMINI_CLI_HOME",
+      "value": "/out/gemini-home"
+    },
+    {
+      "name": "GEMINI_CLI_TRUST_WORKSPACE",
+      "value": "true"
+    },
+    {
+      "name": "CI",
+      "value": "1"
+    },
+    {
+      "name": "NO_BROWSER",
+      "value": "1"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "Gemini CLI has no OpenAI or Anthropic client, so a local LiteLLM gateway sits in front of it. The gateway accepts Gemini API calls on 127.0.0.1:4000 and forwards them to $PROXY_URL/v1/chat/completions. LiteLLM's wildcard route sends every Gemini model name (the main model and any helper or router models) to the proxy as the same name, e.g. 'gemini-2.5-pro'. The auth type has to be set to gemini-api-key in the system settings file. Without it, setting GOOGLE_GEMINI_BASE_URL auto-selects the 'gateway' auth type, and headless auth validation rejects that type. Outputs: the stream-json event log goes to /out/gemini-stream.jsonl, the full session transcript to /out/gemini-home/.gemini/tmp/<project>/chats/session-*.jsonl, and the LiteLLM log to /out/litellm.log. The build downloads Node 20.19.5 and uv/Python 3.12. LiteLLM is not pinned to a version (pin it for reproducibility). The base image's python and node are left alone. Token stats in the CLI output show 0 through this path, but that does not affect the run. Verified by building on buildpack-deps:jammy (arm64) and running one task against a mock OpenAI streaming server, with both the tool call and the final answer, exit code 0."
+}

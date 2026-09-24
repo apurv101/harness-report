@@ -17,6 +17,10 @@ URLs
     /api/me                        whether auth is on, and who is signed in
     /api/github/installations      the app installations the signed-in user has
     /api/github/repos?installation=<id>   the repositories one installation grants
+    POST /api/evals {"repo": "owner/name"}  start run.sh on that repo × the bowling task (one at a time; 409 if busy)
+    /api/evals/current             the evaluation running now, or null
+    /api/evals/<id>?after=<n>      follow one: its status, events from n on, live model calls, and the result when done
+    POST /api/evals/<id>/cancel    stop it (run.sh removes its containers on the way out)
 
 The frontend is the React app in web/; `npm --prefix web run build` writes web/dist, and everything under
 it is served as-is with index.html as the fallback for the app's own routes.  `npm --prefix web run dev`
@@ -30,9 +34,9 @@ Every run is one folder runs/<run-id>/; its run.json says what harness (harness.
 """
 import argparse, json, os, re, sys
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
-from urllib.parse import unquote, parse_qs
+from urllib.parse import unquote, parse_qs, urlsplit
 
-import auth
+import auth, evals
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.abspath(os.path.join(HERE, "web", "dist"))     # the built frontend
@@ -236,6 +240,61 @@ class H(SimpleHTTPRequestHandler):
         except RuntimeError as e: return self.json(502, {"error": str(e)})
         return self.json(404, {"error": "no such api route"})
 
+    def eval_state(self, ev, after):
+        """What the site polls: the evaluation, run.sh's events from `after` on, the live calls, and the run's
+        summary (reward, tests, calls) once it has finished."""
+        evs, nxt = evals.events(ev["id"], after)
+        done = ev["status"] != "running" and find_run(ev["run"])
+        return {"eval": {k: v for k, v in ev.items() if k != "pid"}, "events": evs, "next": nxt,
+                "live": evals.live(ev), "result": summary(ev["run"]) if done else None}
+
+    def evals_get(self, parts, q):
+        if parts == ["current"]:
+            ev = evals.current()
+            return self.json(200, self.eval_state(ev, 0) if ev else None)
+        if len(parts) == 1:
+            ev = evals.get(parts[0])
+            if not ev: return self.json(404, {"error": "no such evaluation"})
+            try: after = max(0, int((q.get("after") or ["0"])[0]))
+            except ValueError: after = 0
+            return self.json(200, self.eval_state(ev, after))
+        return self.json(404, {"error": "no such api route"})
+
+    def clone_token(self, sess, repo):
+        """A short-lived clone token when the signed-in user's GitHub App installations grant this repo and it is
+        private.  None for a public repo (cloned anonymously).  PermissionError for a private repo we cannot reach."""
+        if not sess or not auth.can_clone(): return None
+        for inst in auth.installations(sess):
+            for r in auth.repositories(sess, inst["id"]):
+                if r["name"].lower() == repo.lower():
+                    return auth.clone_token(inst["id"])[0] if r["private"] else None
+        return None
+
+    def do_POST(self):
+        path = self.path.partition("?")[0]
+        parts = [unquote(p) for p in path.strip("/").split("/") if p]
+        if parts[:2] != ["api", "evals"]: return self.json(404, {"error": "no such api route"})
+        # The site's own pages only: a cross-site form or fetch carries another Origin (and cannot send JSON without CORS)
+        origin = self.headers.get("Origin")
+        if origin and urlsplit(origin).netloc != self.headers.get("Host"): return self.json(403, {"error": "cross-origin request"})
+        if not (self.headers.get("Content-Type") or "").startswith("application/json"): return self.json(415, {"error": "send JSON"})
+        sess = auth.session_of(self.headers.get("Cookie")) if auth.configured() else None
+        if auth.configured() and not sess: return self.json(401, {"error": "sign in with github"})
+        try: body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        except ValueError: return self.json(400, {"error": "bad json"})
+        if parts[2:] == []:
+            repo = str(body.get("repo") or "").strip().removesuffix(".git")
+            if not evals.REPO_NAME.match(repo): return self.json(400, {"error": "repo must look like owner/name"})
+            try: token = self.clone_token(sess, repo)
+            except RuntimeError as e: return self.json(502, {"error": f"could not get a clone token from GitHub: {e}"})
+            try: ev = evals.start(repo, user=(auth.public(sess) or {}).get("login"), token=token)
+            except evals.Busy as b: return self.json(409, {"error": f"{b.eval['repo']} is already running; one evaluation at a time", "eval": b.eval["id"]})
+            return self.json(201, self.eval_state(ev, 0))
+        if len(parts) == 4 and parts[3] == "cancel":
+            ev = evals.cancel(parts[2])
+            return self.json(200, {"eval": ev["id"], "cancelled": bool(ev.get("cancelled"))}) if ev else self.json(404, {"error": "no such evaluation"})
+        return self.json(404, {"error": "no such api route"})
+
     def do_GET(self):
         path, _, query = self.path.partition("?")
         parts = [unquote(p) for p in path.strip("/").split("/") if p]
@@ -252,6 +311,7 @@ class H(SimpleHTTPRequestHandler):
             if parts[1:2] == ["github"]:
                 if not sess: return self.json(401, {"error": "sign in with github"})
                 return self.github_route(parts[2:], q, sess)
+            if parts[1:2] == ["evals"]: return self.evals_get(parts[2:], q)
             return self.json(404, {"error": "no such api route"})
         if parts[:1] == ["raw"] and len(parts) >= 3:
             d = find_run(parts[1]); p = os.path.realpath(os.path.join(d or "", *parts[2:]))

@@ -1,0 +1,48 @@
+{
+  "summary": "claude-job-hunter is a Node.js (ESM, .mjs) autonomous job-search agent: a set of standalone workers under workers/ plus a Claude Code skill (SKILL.md) that orchestrates them. The one-shot, non-interactive entrypoint is `node workers/apply-now.mjs --text=\"<job posting text>\" [--dry-run]`, which analyzes a posting, writes a tailored cover letter, prints a preview and logs to a SQLite DB (better-sqlite3). All LLM traffic goes through workers/anthropic-client.mjs, which uses bare fetch() with HARDCODED URLs: https://api.anthropic.com/v1/messages (model claude-sonnet-4-6, used when ANTHROPIC_API_KEY is set) with fallbacks to https://api.groq.com/openai/v1/chat/completions (when GROQ_API_KEY is set) and a local Ollama. There is no base-URL env for Anthropic/Groq, so the overlay adds a NODE_OPTIONS --import preload (/opt/harness/proxy-shim.mjs) that wraps globalThis.fetch and rewrites api.anthropic.com to $ANTHROPIC_BASE_URL and api.groq.com/openai/v1 to $OPENAI_BASE_URL. With only ANTHROPIC_API_KEY set, every call (callSmart and callFast) hits the proxy's Anthropic /v1/messages endpoint. Each call is also traced to a spans table in the same SQLite file. Verified end-to-end with a mock proxy on debian:bookworm-slim and buildpack-deps:jammy (arm64): two /v1/messages calls, exit 0, agent_log row and spans written, DB + log copied to /out.",
+  "base_image": "debian:bookworm-slim",
+  "dockerfile": "ARG BASE=debian:bookworm-slim\nFROM ${BASE}\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl xz-utils git && rm -rf /var/lib/apt/lists/*\nARG NODE_VERSION=22.14.0\nRUN set -eux; case \"$(uname -m)\" in x86_64) a=x64;; aarch64|arm64) a=arm64;; *) echo \"unsupported arch\"; exit 1;; esac; \\\n    mkdir -p /opt/harness/bin; \\\n    curl -fsSL \"https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${a}.tar.xz\" | tar -xJ -C /opt/harness; \\\n    mv \"/opt/harness/node-v${NODE_VERSION}-linux-${a}\" /opt/harness/node; \\\n    mkdir -p /etc/profile.d; \\\n    echo 'export PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH' > /etc/profile.d/harness.sh\nENV PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH\nCOPY . /opt/harness/src\nENV PUPPETEER_SKIP_DOWNLOAD=1 PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm_config_update_notifier=false npm_config_fund=false npm_config_audit=false\nRUN cd /opt/harness/src/workers && npm ci --omit=dev\nRUN printf '%s\\n' \\\n  '// Overlay preload: the harness hardcodes api.anthropic.com and api.groq.com; rewrite them to the proxy.' \\\n  'const A = (process.env.ANTHROPIC_BASE_URL || \"\").replace(/\\/+$/, \"\");' \\\n  'const O = (process.env.OPENAI_BASE_URL || \"\").replace(/\\/+$/, \"\");' \\\n  'const RULES = [];' \\\n  'if (A) RULES.push([/^https:\\/\\/api\\.anthropic\\.com(?=\\/|$)/, A]);' \\\n  'if (O) RULES.push([/^https:\\/\\/api\\.groq\\.com\\/openai\\/v1(?=\\/|$)/, O]);' \\\n  'if (RULES.length) {' \\\n  '  const orig = globalThis.fetch;' \\\n  '  globalThis.fetch = function (input, init) {' \\\n  '    const url = typeof input === \"string\" ? input : (input instanceof URL ? input.href : input && input.url);' \\\n  '    if (typeof url === \"string\") {' \\\n  '      let nu = url;' \\\n  '      for (const [re, to] of RULES) if (re.test(nu)) { nu = nu.replace(re, to); break; }' \\\n  '      if (nu !== url) input = (typeof input === \"string\" || input instanceof URL) ? nu : new Request(nu, input);' \\\n  '    }' \\\n  '    return orig.call(globalThis, input, init);' \\\n  '  };' \\\n  '}' > /opt/harness/proxy-shim.mjs \\\n  && printf '#!/bin/sh\\nexec node /opt/harness/src/workers/apply-now.mjs \"$@\"\\n' > /opt/harness/bin/job-hunter \\\n  && chmod +x /opt/harness/bin/job-hunter\nENV NODE_OPTIONS=--import=/opt/harness/proxy-shim.mjs\n",
+  "run_command": "export PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH; set -o pipefail; mkdir -p /out; node /opt/harness/src/workers/init-db.mjs >/dev/null; node /opt/harness/src/workers/apply-now.mjs --text=\"$TASK\" --dry-run 2>&1 | tee /out/apply-now.log; rc=$?; cp -f /opt/harness/src/workers/applications.db* /out/ 2>/dev/null; exit $rc",
+  "check_command": "export PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH; node --version && node /opt/harness/src/workers/apply-now.mjs 2>&1 | grep -q \"Usage: node apply-now.mjs\"",
+  "env": [
+    {
+      "name": "ANTHROPIC_BASE_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "NODE_OPTIONS",
+      "value": "--import=/opt/harness/proxy-shim.mjs"
+    },
+    {
+      "name": "DOTENV_CONFIG_QUIET",
+      "value": "true"
+    },
+    {
+      "name": "CI",
+      "value": "1"
+    },
+    {
+      "name": "PUPPETEER_SKIP_DOWNLOAD",
+      "value": "1"
+    },
+    {
+      "name": "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD",
+      "value": "1"
+    }
+  ],
+  "api_style": "anthropic",
+  "workdir": "/work",
+  "notes": "VERIFIED: overlay built on debian:bookworm-slim and buildpack-deps:jammy (arm64, Docker 29). check_command passes on both. run_command executed end-to-end on both against a mock proxy: apply-now made exactly two POST /v1/messages calls (model=claude-sonnet-4-6, x-api-key=proxy), exited 0, wrote an agent_log dry_run row and two spans, and /out received apply-now.log plus applications.db(+wal/shm).\n\nWhat $TASK means here: this is a job-application agent, not a coding agent. $TASK is treated as pasted job-posting text (apply-now --text). It does not read or edit files in the task cwd; its outputs are stdout (preview + cover letter) and the SQLite DB. --dry-run is required: without it a 'form' result launches Playwright/Chrome (not installed, needs external network) and an 'email' result tries SMTP/Gmail; dry-run still performs both model calls and logs the result.\n\nRouting: the harness has NO base-URL setting for Anthropic/Groq (only OLLAMA_BASE, which speaks the Ollama /api/chat format the proxy does not). The overlay's fetch-rewriting preload (NODE_OPTIONS --import) maps api.anthropic.com -> ANTHROPIC_BASE_URL and api.groq.com/openai/v1 -> OPENAI_BASE_URL. Do NOT set GROQ_API_KEY: with it unset, callFast and callSmart both use the Anthropic path, so the proxy only sees /v1/messages. Model name is hardcoded (claude-sonnet-4-6); no env var chooses it, the proxy substitutes. dotenv loads ./.env from cwd with override:true, so a task dir must not contain a .env that sets ANTHROPIC_API_KEY/GROQ_API_KEY.\n\nDB: init-db.mjs must run first (fresh DB lacks agent_log, otherwise the final logDB call throws). init-db hardcodes workers/applications.db and ignores HUNTDESK_DB_PATH, so the run uses that default file (same one telemetry writes spans to) and copies db+wal+shm to /out afterwards.\n\nBuild notes: PATH is re-exported via /etc/profile.d because Debian's /etc/profile resets PATH under bash -lc (jammy does not). npm ci --omit=dev skips promptfoo; native modules (better-sqlite3, sqlite3, keytar) come as prebuilt binaries, no compiler or python needed. PUPPETEER_SKIP_DOWNLOAD/PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD prevent browser downloads. Optional profile env (FIRST_NAME, LAST_NAME, EMAIL, PROFILE_TEXT, CV_PATH) can be added to make the cover letter meaningful; defaults are used otherwise. A convenience wrapper /opt/harness/bin/job-hunter forwards to apply-now.mjs."
+}
