@@ -12,13 +12,22 @@ URLs
     /api/runs                      JSON list of runs (summary of each run.json)
     /api/run/<run-id>              JSON bundle: run.json, task, command, recipe, calls[], logs, files[]
     /raw/<run-id>/<file>           a file from the run folder as-is
+    /auth/github                   start "Sign in with GitHub"; /auth/callback finishes it, /auth/logout ends it
+    /api/me                        whether auth is on, and who is signed in
+    /api/github/installations      the app installations the signed-in user has
+    /api/github/repos?installation=<id>   the repositories one installation grants
+
+Sign-in is optional: with no GITHUB_CLIENT_ID in the environment nobody can sign in at all.  Either way the
+runs are public; only /api/github/* needs the session cookie.  See auth.py for the env it reads.
 
 Every run is one folder runs/<run-id>/; its run.json says what harness (harness.name/repo/commit), what task
 (kind prompt|harbor, task.name/taskset, prompt) and what model it ran, plus rc/seconds/reward/calls once finished.
 """
 import argparse, json, os, re, sys
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
-from urllib.parse import unquote
+from urllib.parse import unquote, parse_qs
+
+import auth
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SITE = os.path.join(HERE, "site")
@@ -173,13 +182,67 @@ class H(SimpleHTTPRequestHandler):
 
     def json(self, code, obj): self.send(code, json.dumps(obj), "application/json")
 
+    def redirect(self, location, *cookies):
+        self.send_response(302); self.send_header("Location", location)
+        for c in cookies: self.send_header("Set-Cookie", c)
+        self.send_header("Content-Length", "0"); self.send_header("Cache-Control", "no-store"); self.end_headers()
+
+    def auth_route(self, parts, q):
+        """The OAuth dance.  The browser only ever holds a signed session id; tokens stay in auth.SESSIONS."""
+        if not auth.configured(): return self.json(404, {"error": "github sign-in is not configured"})
+        if parts == ["github"]:
+            state, cookie = auth.state_cookie()
+            return self.redirect(auth.authorize_url(state), cookie)
+        if parts == ["install"]:
+            url = auth.install_url("")
+            if not url: return self.send(404, "GITHUB_APP_SLUG is not set", "text/plain")
+            state, cookie = auth.state_cookie()
+            return self.redirect(auth.install_url(state), cookie)
+        if parts == ["callback"]:
+            code = (q.get("code") or [""])[0]
+            if not code:
+                # A bare install (the app does not ask for user authorization) comes back with
+                # installation_id + setup_action and no state.  No token is minted here, so there
+                # is nothing to CSRF-protect; just drop the user back into the picker.
+                if (q.get("installation_id") or [""])[0]:
+                    return self.redirect("/#import", auth.clear_state())
+                return self.send(400, "no code in callback", "text/plain")
+            if not auth.check_state(self.headers.get("Cookie"), (q.get("state") or [""])[0]):
+                return self.send(400, "bad oauth state; start again at /auth/github", "text/plain")
+            try: user = auth.exchange(code)
+            except RuntimeError as e: return self.send(502, f"github sign-in failed: {e}", "text/plain")
+            return self.redirect("/#import", auth.login(user), auth.clear_state())
+        if parts == ["logout"]:
+            return self.redirect("/", auth.logout(auth.session_id(self.headers.get("Cookie")) or ""))
+        return self.json(404, {"error": "no such auth route"})
+
+    def github_route(self, parts, q, sess):
+        """Read-only GitHub reads on the user's behalf, so the frontend never handles a token."""
+        try:
+            if parts == ["installations"]: return self.json(200, auth.installations(sess))
+            if parts == ["repos"]:
+                inst = (q.get("installation") or [""])[0]
+                if not inst.isdigit(): return self.json(400, {"error": "installation=<id> required"})
+                return self.json(200, auth.repositories(sess, inst))
+        except RuntimeError as e: return self.json(502, {"error": str(e)})
+        return self.json(404, {"error": "no such api route"})
+
     def do_GET(self):
-        parts = [unquote(p) for p in self.path.split("?")[0].strip("/").split("/") if p]
+        path, _, query = self.path.partition("?")
+        parts = [unquote(p) for p in path.strip("/").split("/") if p]
+        q = parse_qs(query)
+        if parts[:1] == ["auth"]: return self.auth_route(parts[1:], q)
+        sess = auth.session_of(self.headers.get("Cookie")) if auth.configured() else None
         if parts[:1] == ["api"]:
+            if parts[1:] == ["me"]: return self.json(200, {"auth": auth.configured(), "user": auth.public(sess),
+                                                            "install_url": "/auth/install" if auth.install_url() else "", "can_clone": auth.can_clone()})
             if parts[1:] == ["runs"]: return self.json(200, [summary(r) for r in run_dirs()])
             if parts[1:2] == ["run"] and len(parts) == 3:
                 d = find_run(parts[2])
                 return self.json(200, bundle(d)) if d else self.json(404, {"error": "no such run"})
+            if parts[1:2] == ["github"]:
+                if not sess: return self.json(401, {"error": "sign in with github"})
+                return self.github_route(parts[2:], q, sess)
             return self.json(404, {"error": "no such api route"})
         if parts[:1] == ["raw"] and len(parts) >= 3:
             d = find_run(parts[1]); p = os.path.realpath(os.path.join(d or "", *parts[2:]))
@@ -199,5 +262,6 @@ class H(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("--port", type=int, default=8789); ap.add_argument("--runs", default=RUNS)
     a = ap.parse_args(); RUNS = os.path.abspath(a.runs)
-    print(f"Harness Report on http://localhost:{a.port}   runs={RUNS}", flush=True)
+    mode = f"github sign-in as {auth.CLIENT_ID} ({auth.BASE_URL})" if auth.configured() else "open (no GITHUB_CLIENT_ID)"
+    print(f"Harness Report on http://localhost:{a.port}   runs={RUNS}   auth={mode}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", a.port), H).serve_forever()

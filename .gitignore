@@ -5,3 +5,4 @@ __pycache__/
 .wrangler/
 .DS_Store
 .playwright-mcp/
+.auth/

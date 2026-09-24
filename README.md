@@ -120,6 +120,34 @@ contents of `runs/`. A plain static host can display the frontend, but needs the
 
 ## Hosting
 
+## Signing in with GitHub
+
+`auth.py` gives `serve.py` a "Sign in with GitHub" flow built on one **GitHub App** — the same app both
+identifies the user (user-to-server OAuth) and grants the repositories we may clone (installation tokens).
+Recorded runs stay public either way — `/api/runs`, `/api/run/<id>` and `/raw/*` never ask who you are, because
+the runs are the showcase.  Signing in gates only `/api/github/*`, which acts on the signed-in user's behalf.  `auth.py` reads `.env` the way
+`run.sh` does, so the variables can live there; anything already in the environment wins.
+
+```sh
+GITHUB_CLIENT_ID=Iv23li... GITHUB_CLIENT_SECRET=... SESSION_SECRET=$(openssl rand -hex 32) \
+BASE_URL=https://app.harnessreport.com python3 serve.py
+```
+
+| route | what |
+|---|---|
+| `/auth/github` | 302 to GitHub with a signed state nonce in a cookie |
+| `/auth/callback` | checks the nonce, trades the code for a token, reads `/user`, sets the session cookie |
+| `/auth/logout` | drops the session |
+| `/api/me` | `{auth, user, install_url, can_clone}` — what the frontend boots from |
+| `/api/github/installations`, `/api/github/repos?installation=<id>` | the repositories the user granted (401 when signed out) |
+
+The browser only ever holds a signed session id (`HttpOnly`, `SameSite=Lax`, `Secure` on https); the GitHub
+tokens stay server-side in `.auth/sessions.json` (0600). `GITHUB_APP_ID` + `GITHUB_APP_KEY` add
+`auth.clone_token(installation_id)`, a ~1 h token for `git clone https://x-access-token:<token>@github.com/...`;
+the app JWT is signed by `openssl`, so the no-dependency promise holds. `site/index.html` asks `/api/me` on
+boot: served by `serve.py` the real flow takes over, and on the static Cloudflare Pages copy the call 404s and
+the simulated preview stands.
+
 `site/` also contains `favicon.svg`, `robots.txt`, `sitemap.xml`, and `llms.txt`. It is a Cloudflare Pages project
 named `harness-report` (Pages URL `harness-report-927.pages.dev`; custom domains `harnessreport.com` and
 `www.harnessreport.com`). DNS for the domain is the Route 53 zone in the `operator` AWS profile. Edit the
