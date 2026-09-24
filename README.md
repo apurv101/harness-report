@@ -14,6 +14,7 @@ tasks inside their own task images, runs each task's verifier, and records the r
 ./run.sh runs                                              # list the runs (one folder each under runs/)
 ./run.sh view runs/<run-id>                                # the recorded calls as a conversation
 ./run.sh <url> "<task>" --rebuild                          # regenerate the recipe and overlay for this repo
+./run.sh <url> --taskset aider_polyglot --tasks t --model bedrock/<id>   # override MODEL from .env for this invocation
 ```
 
 Files: `run.sh` (the pipeline), `proxy.py` (the recorder), `.env` (MODEL, AWS_PROFILE, AWS_REGION; optional
@@ -93,7 +94,9 @@ python3 ui/serve.py                         # http://localhost:8788   (--port, -
 `/` lists every run. `/<name>/<run-id>` (or just `/<run-id>`) shows one run: the header facts from `run.json`,
 the task, and tabs for the trajectory (the conversation from any recorded call, last by default, with tool calls
 and observations), the calls table (click a row for the raw request and response), the recipe (summary, run and
-check commands, env, Dockerfile, notes), the logs (`stdout.log`, `stderr.log`, `proxy.log`), and every file in the
+check commands, env, Dockerfile, notes), the verifier (Harbor: reward, the task's test counts parsed from pytest's
+`-v` output with the failed test names, and the test.sh logs; tests from files the agent wrote itself are shown
+separately as `+N own`), the logs (`stdout.log`, `stderr.log`, `proxy.log`), and every file in the
 run folder with a raw link. `/api/run/<name>/<run-id>` returns the same data as JSON.
 
 ## Site

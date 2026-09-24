@@ -14,7 +14,7 @@ URLs
 Every run is one folder runs/<run-id>/; its run.json says what harness (harness.name/repo/commit), what task
 (kind prompt|harbor, task.name/taskset, prompt) and what model it ran, plus rc/seconds/reward/calls once finished.
 """
-import argparse, json, os, sys
+import argparse, json, os, re, sys
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import unquote
 
@@ -50,6 +50,82 @@ def find_run(rid):
     return d if rid and "/" not in rid and rid not in (".", "..") and os.path.isdir(d) else None
 
 
+TEST_LINE = re.compile(r"^(\S+::\S+)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b", re.M)
+TEST_SUMMARY = re.compile(r"^=+ (.*?(?:passed|failed|error)[^=]*?) in [\d.]+s .*=+$", re.M)
+
+
+FAIL_HEAD = re.compile(r"^_{1,}\s+(\S+)\s+_{1,}$", re.M)
+
+
+def failure_details(out):
+    """pytest's FAILURES section split per test: {test_name: traceback text}."""
+    m = re.search(r"^=+ FAILURES =+$\n(.*?)(?=^=+ .* =+$)", out, re.M | re.S)
+    if not m: return {}
+    parts = FAIL_HEAD.split(m.group(1)); det = {}
+    for i in range(1, len(parts) - 1, 2): det[parts[i].split(".")[-1]] = parts[i + 1].strip()
+    return det
+
+
+def test_sources(tdir):
+    """{basename: {function name: source}} for every python test file in the task's tests folder."""
+    import ast
+    src = {}
+    for root, _, fs in os.walk(tdir):
+        for f in fs:
+            if not f.endswith(".py"): continue
+            code = read(os.path.join(root, f))
+            if code is None: continue
+            try: tree = ast.parse(code)
+            except SyntaxError: continue
+            lines = code.splitlines(); funcs = {}
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
+                    start = min([node.lineno] + [x.lineno for x in node.decorator_list])
+                    funcs[node.name] = "\n".join(lines[start - 1:node.end_lineno])
+            src[f] = funcs
+    return src
+
+
+def tests(d, full=False):
+    """Per-test results parsed from verifier/stdout.log when the verifier ran pytest -v (the aider_polyglot tasks do):
+    passed/failed/total, the failed test names, and pytest's own summary line. None when there is no such output.
+    full=True adds `cases`: every test in pytest order with its result, its source from the task's tests folder,
+    and its failure traceback."""
+    out = read(os.path.join(d, "verifier", "stdout.log"))
+    if not out: return None
+    found = TEST_LINE.findall(out)
+    summ = TEST_SUMMARY.findall(out)
+    # pytest aborted before running anything (e.g. a file the agent left behind failed at import): report that, not 0 tests
+    aborted = re.search(r"^!+ Interrupted: (.*?) !+$", out, re.M)
+    if aborted:
+        bad = re.findall(r"^_+ ERROR collecting (\S+) _+$", out, re.M)
+        return {"passed": 0, "failed": 0, "total": 0, "failed_names": [], "agent_written": 0, "cases": [] if full else None,
+                "aborted": aborted.group(1) + (": " + ", ".join(bad) if bad else ""), "summary": summ[-1] if summ else None}
+    if not found and not summ: return None
+    by = {}
+    for name, res in found: by[name] = res          # a test reported twice keeps its last result
+    # Only the task's own test files count: pytest also collects any test files the agent left in the workdir.
+    # The task folder (run.json task.taskset_dir/task.name) says which files are official, when it is readable.
+    rj = load_json(os.path.join(d, "run.json")) or {}; t = rj.get("task") or {}
+    official = None; tdir = None
+    if t.get("taskset_dir") and t.get("name"):
+        tdir = os.path.join(t["taskset_dir"], t["name"], "tests")
+        if os.path.isdir(tdir): official = {f for _, _, fs in os.walk(tdir) for f in fs}
+        else: tdir = None
+    own = {n: r for n, r in by.items() if official is None or os.path.basename(n.split("::")[0]) in official}
+    extra = len(by) - len(own)
+    failed = sorted(n.split("::")[-1] for n, r in own.items() if r in ("FAILED", "ERROR"))
+    passed = sum(1 for r in own.values() if r in ("PASSED", "XPASS"))
+    res = {"passed": passed, "failed": len(failed), "total": len(own), "failed_names": failed, "agent_written": extra,
+           "summary": summ[-1] if summ else None}
+    if full:
+        det = failure_details(out); src = test_sources(tdir) if tdir else {}
+        res["cases"] = [{"name": n.split("::")[-1], "file": os.path.basename(n.split("::")[0]), "result": r,
+                         "own": n in own, "detail": det.get(n.split("::")[-1]),
+                         "source": src.get(os.path.basename(n.split("::")[0]), {}).get(n.split("::")[-1])} for n, r in by.items()]
+    return res
+
+
 def summary(rid):
     """The run's run.json as written by run.sh (origin half before the run, result half merged in after), plus
     `run` (the folder name), `has_run_json`, and `calls` counted from calls.jsonl when the run has not finished."""
@@ -58,6 +134,7 @@ def summary(rid):
     out = {"run": rid, "has_run_json": bool(rj), **rj}
     if out.get("calls") is None:
         out["calls"] = sum(1 for l in read(os.path.join(d, "calls.jsonl"), "").splitlines() if l.strip())
+    out["tests"] = tests(d)
     return out
 
 
@@ -75,6 +152,7 @@ def bundle(d):
             files.append({"name": rel, "bytes": os.path.getsize(p), "core": rel in CORE})
     files.sort(key=lambda x: x["name"])
     verifier = {k: read(os.path.join(d, "verifier", k)) for k in ("stdout.log", "stderr.log", "reward.txt")} if os.path.isdir(os.path.join(d, "verifier")) else None
+    if verifier: verifier["tests"] = tests(d, full=True)
     return {"run": rid, "run_json": summary(rid),
             "recipe": load_json(os.path.join(d, "recipe.json")),
             "calls": calls, "calls_unparsed": bad,

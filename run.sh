@@ -16,6 +16,7 @@
 #   --all         every task in the taskset             -k N        runs per task (default 1)
 #   --rebuild     re-clone, re-analyze and rebuild the harness overlay
 #   --run-id ID   name the run (default: timestamp)
+#   --model M     model for this invocation, e.g. bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0 (default: MODEL in .env)
 #
 # Stages:   fetch     git clone → work/<name>/repo
 #           select    resolve the Harbor tasks; skip multi-container (docker-compose) ones; build the first task image
@@ -156,6 +157,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --rebuild) REBUILD=1 ;;
     --run-id) RUN_ID="${2:?}"; shift ;;
+    --model) MODEL="${2:?}"; shift ;;
     --task-file) TASK_FILE="${2:?}"; shift ;;
     --taskset) TASKSET="${2:?}"; shift ;;
     --tasks) TASK_NAMES="${2:?}"; shift ;;
@@ -178,7 +180,7 @@ else
   [ -z "$TASK_NAMES$GREP$LIMIT" ] && [ "$ALL" = 0 ] || die "--tasks/--grep/--limit/--all need --taskset"
 fi
 [ -f "$HERE/.env" ] || die "no .env (MODEL, AWS_PROFILE, AWS_REGION)"
-: "${MODEL:?MODEL in .env}"; : "${AWS_PROFILE:?AWS_PROFILE in .env}"; AWS_REGION="${AWS_REGION:-us-west-2}"
+: "${MODEL:?MODEL in .env or --model}"; : "${AWS_PROFILE:?AWS_PROFILE in .env}"; AWS_REGION="${AWS_REGION:-us-west-2}"
 docker info >/dev/null 2>&1 || die "Docker is not running"
 command -v claude >/dev/null || die "claude CLI not found (the analyze stage runs claude -p)"
 
