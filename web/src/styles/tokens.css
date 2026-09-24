@@ -1,0 +1,55 @@
+/* The palette: ink on warm paper, one electric accent, two state colours. */
+/* Ink on warm paper, one electric accent, two state colours.  Light and dark. */
+:root {
+  --brand: #d8431a;
+  --brand-hover: #b23414;
+  --brand-soft: #fdeee7;
+  --brand-border: #f0c4b2;
+  --focus: #d8431a;
+  --background: #faf6ec;
+  --surface-subtle: #f4eee0;
+  --surface-muted: #efe8d7;
+  --card: #fffdf8;
+  --product-ink: #171310;
+  --text-secondary: #3a3129;
+  --product-muted: #7b7161;
+  --product-line: #e2d9c6;
+  --line-soft: #ece5d5;
+  --line-strong: #c7b99f;
+  --zing: #c8ec1f;            /* pass */
+  --zing-ink: #38460a;
+  --flare: #e03e14;           /* needs work */
+  --flare-soft: #ffe8e1;
+  --hard: #171310;            /* the offset-shadow colour */
+  --logo-ink: #171310;
+  --logo-accent: #d8431a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brand: #ff7f57;
+    --brand-hover: #ff9b7b;
+    --brand-soft: #2e1c14;
+    --brand-border: #56342a;
+    --focus: #ff7f57;
+    --background: #14120f;
+    --surface-subtle: #1d1a15;
+    --surface-muted: #23201a;
+    --card: #1a1713;
+    --product-ink: #f7f2e7;
+    --text-secondary: #d6cdbc;
+    --product-muted: #9d9385;
+    --product-line: #332e26;
+    --line-soft: #2b261f;
+    --line-strong: #4c4339;
+    --zing: #b9dd15;
+    --zing-ink: #131c00;
+    --flare: #ff7b5c;
+    --flare-soft: #3a201a;
+    --hard: #4a4034;
+    --logo-ink: #f7f2e7;
+    --logo-accent: #ff7f57;
+  }
+}
+
+/* Type families.  The display face carries the character layer. */
+:root { color-scheme: light dark; --ground: var(--background); --panel: var(--surface-muted); --ink: var(--product-ink); --muted: var(--product-muted); --line: var(--product-line); --accent: var(--brand); --sans: 'Inter', -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Arial, sans-serif; --mono: 'JetBrains Mono', ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace; --display: 'Bricolage Grotesque', 'Inter', -apple-system, "Helvetica Neue", sans-serif; }

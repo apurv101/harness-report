@@ -1,0 +1,27 @@
+/* Document, typography, and the page container every view sits in. */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 15px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+body.product-page { color-scheme: light dark; --ground: var(--background); --panel: var(--surface-muted); --ink: var(--product-ink); --muted: var(--product-muted); --line: var(--product-line); --accent: var(--brand); background: var(--ground); color: var(--ink); }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button, a, input { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }
+[hidden] { display: none !important; }
+
+.wrap { width: 100%; max-width: 1216px; margin: 0 auto; padding: 0 40px; }
+.product-page .wrap { max-width: 1216px; padding: 0 40px; }
+
+.product-page main { padding: 0; }
+.product-page #crumb { display: none; }
+.product-page h1, .product-page h2, .product-page h3, .product-page p { margin: 0; }
+.product-page h2 { color: var(--ink); text-transform: none; letter-spacing: -.8px; font-size: 32px; font-weight: 600; line-height: 1.2; }
+.product-page h3 { font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
+.product-page p { line-height: 1.7; }
+
+.product-page pre { white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line-soft); border-radius: 6px; padding: 14px; }
+.product-page details { margin-top: 17px; }
+.product-page details summary { font-size: 11.5px; color: var(--product-muted); }
+.product-page details pre { font-size: 11.5px; margin-top: 10px; background: var(--surface-subtle); border-color: var(--line-soft); color: var(--product-muted); }
+.product-page details { font-size: 12px; }
+h1[tabindex="-1"]:focus { outline: none; }

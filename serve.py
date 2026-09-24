@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """serve.py — the Harness Report site and read-only run API.  No dependencies beyond python3.
 
-    python3 serve.py                 # serves site/ and runs/ on http://localhost:8789
-    python3 serve.py --port 9000 --runs /path/to/runs
+    npm --prefix web install && npm --prefix web run build     # the frontend, once
+    python3 serve.py                 # serves web/dist and runs/ on http://localhost:8789
+    python3 serve.py --port 9000 --runs /path/to/runs --dist /path/to/dist
 
 URLs
     /                              product landing
@@ -17,6 +18,10 @@ URLs
     /api/github/installations      the app installations the signed-in user has
     /api/github/repos?installation=<id>   the repositories one installation grants
 
+The frontend is the React app in web/; `npm --prefix web run build` writes web/dist, and everything under
+it is served as-is with index.html as the fallback for the app's own routes.  `npm --prefix web run dev`
+serves it on :5173 instead and proxies /api, /auth and /raw back here.
+
 Sign-in is optional: with no GITHUB_CLIENT_ID in the environment nobody can sign in at all.  Either way the
 runs are public; only /api/github/* needs the session cookie.  See auth.py for the env it reads.
 
@@ -30,9 +35,13 @@ from urllib.parse import unquote, parse_qs
 import auth
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SITE = os.path.join(HERE, "site")
-PAGE = os.path.join(SITE, "index.html")
+DIST = os.path.abspath(os.path.join(HERE, "web", "dist"))     # the built frontend
 RUNS = os.path.abspath(os.path.join(HERE, "runs"))
+
+TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+         ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml",
+         ".txt": "text/plain; charset=utf-8", ".xml": "application/xml", ".ico": "image/x-icon",
+         ".png": "image/png", ".webp": "image/webp", ".woff2": "font/woff2", ".map": "application/json"}
 
 TEXT_FILES = ("task.txt", "command.sh", "stdout.log", "stderr.log", "proxy.log")   # inlined into the bundle
 CORE = TEXT_FILES + ("run.json", "recipe.json", "calls.jsonl")                     # everything else is "other"
@@ -249,19 +258,23 @@ class H(SimpleHTTPRequestHandler):
             if not d or not p.startswith(os.path.realpath(d) + os.sep) or not os.path.isfile(p): return self.send(404, "not found", "text/plain")
             ctype = "application/json" if p.endswith(".json") else "text/plain; charset=utf-8"
             return self.send(200, open(p, "rb").read(), ctype)
-        static_types = {"favicon.svg": "image/svg+xml", "robots.txt": "text/plain; charset=utf-8",
-                        "sitemap.xml": "application/xml", "llms.txt": "text/plain; charset=utf-8"}
-        if len(parts) == 1 and parts[0] in static_types:
-            asset = read(os.path.join(SITE, parts[0]))
-            return self.send(200, asset, static_types[parts[0]]) if asset is not None else self.send(404, "not found", "text/plain")
-        # All frontend routes share site/index.html.
-        page = read(PAGE)
-        return self.send(200, page, "text/html; charset=utf-8") if page else self.send(500, "index.html missing", "text/plain")
+        # Anything the build wrote (hashed bundles, favicon, robots.txt) is served as-is.
+        root = os.path.realpath(DIST)
+        asset = os.path.realpath(os.path.join(root, *parts)) if parts else ""
+        if asset.startswith(root + os.sep) and os.path.isfile(asset):
+            return self.send(200, open(asset, "rb").read(), TYPES.get(os.path.splitext(asset)[1], "application/octet-stream"))
+        # Everything else is one of the app's own routes; its router reads them off the URL.
+        page = read(os.path.join(DIST, "index.html"))
+        if page is None: return self.send(500, "web/dist is missing: npm --prefix web install && npm --prefix web run build", "text/plain")
+        return self.send(200, page, "text/html; charset=utf-8")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("--port", type=int, default=8789); ap.add_argument("--runs", default=RUNS)
-    a = ap.parse_args(); RUNS = os.path.abspath(a.runs)
+    ap.add_argument("--dist", default=DIST, help="the built frontend (default web/dist)")
+    a = ap.parse_args(); RUNS = os.path.abspath(a.runs); DIST = os.path.abspath(a.dist)
+    if not os.path.isfile(os.path.join(DIST, "index.html")):
+        print(f"warning: no index.html in {DIST} — run: npm --prefix web install && npm --prefix web run build", file=sys.stderr)
     mode = f"github sign-in as {auth.CLIENT_ID} ({auth.BASE_URL})" if auth.configured() else "open (no GITHUB_CLIENT_ID)"
     print(f"Harness Report on http://localhost:{a.port}   runs={RUNS}   auth={mode}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", a.port), H).serve_forever()

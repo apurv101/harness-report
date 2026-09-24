@@ -101,19 +101,49 @@ route with `OPENAI_BASE_URL` pointed at the proxy and the model name `gpt-4o`, w
 
 ## Frontend
 
-`site/` is the single frontend: landing page, GitHub onboarding preview, and real recorded evaluations,
-with one shared navigation and design. `serve.py` serves it together with the read-only `runs/` API.
-There is no separate `ui/` app and no build step or Python dependencies.
+`web/` is the single frontend: a React + TypeScript app (Vite) covering the landing page, the GitHub
+onboarding preview, and the real recorded evaluations, with one shared navigation and design.
+`npm run build` writes `web/dist`, which `serve.py` serves together with the read-only `runs/` API.
+Python still has no dependencies; the frontend is the only thing that needs a build.
 
 ```sh
+npm --prefix web install                    # once
+npm --prefix web run build                  # writes web/dist
 python3 serve.py                            # http://localhost:8789
-python3 serve.py --port 9000 --runs /path/to/runs
+python3 serve.py --port 9000 --runs /path/to/runs --dist /path/to/dist
+
+npm --prefix web run dev                    # http://localhost:5173, /api + /auth + /raw proxied to :8789
+npm --prefix web run typecheck              # tsc --noEmit, also part of build
 ```
 
-`/` opens the minimal “Evaluate your harness” landing page. `/#connect` starts the GitHub flow;
-`/#runs` lists and searches actual local runs. `/#runs/<run-id>` opens a run's trajectory, calls,
-verifier, recipe, logs, and files. The selected tab survives refresh. Old `/<run-id>` links open
-the same frontend. `/api/runs`, `/api/run/<run-id>`, and `/raw/<run-id>/<file>` provide the underlying data.
+`/` opens the minimal “Evaluate your harness” landing page. `/#/connect` starts the GitHub flow;
+`/#/runs` lists and searches actual local runs. `/#/runs/<run-id>` opens a run's trajectory, calls,
+verifier, recipe, logs, and files. The selected tab is a `?tab=` query, so it survives a refresh.
+Older `#runs/<id>` hashes and `/<run-id>` paths are rewritten to the current form on load.
+`/api/runs`, `/api/run/<run-id>`, and `/raw/<run-id>/<file>` provide the underlying data.
+
+```
+web/
+  index.html                 the page shell: metadata, fonts, <div id="root">
+  public/                    favicon.svg, robots.txt, sitemap.xml, llms.txt — copied into dist as-is
+  src/
+    main.tsx  App.tsx        boot, providers, HashRouter
+    router/                  routes, the flow's guards, and the legacy-link rewrite
+    pages/                   one file per route: landing, sign-in, import, check, result, runs, run detail
+    components/
+      layout/                header, footer, preview banner, the shell every page renders into
+      landing/               hero, the example report, the three steps
+      onboarding/            flow sidebar, repository picker, check stages
+      runs/                  run table, status pills, fact grids, tabs/ (trajectory, calls, verifier, …)
+      ui/                    icons, pills, facts, clipped text, search box, empty card
+    state/                   SessionContext (/api/me), PreviewContext (the simulated onboarding)
+    hooks/                   document title, aborting JSON loads, the simulated run's timers
+    lib/                     api client, formatting, run types, conversation parsing, tooltip text
+    styles/                  tokens → base → layout → ui → landing → onboarding → responsive → runs → character
+```
+
+The stylesheets are imported in that order by `styles/index.css`, and the order matters: `character.css`
+is the riso layer that overrides the structure above it.
 
 GitHub sign-in and the onboarding task remain explicitly simulated. Recorded evaluations use the real
 contents of `runs/`. A plain static host can display the frontend, but needs the run API to load evaluations.
@@ -144,15 +174,18 @@ BASE_URL=https://app.harnessreport.com python3 serve.py
 The browser only ever holds a signed session id (`HttpOnly`, `SameSite=Lax`, `Secure` on https); the GitHub
 tokens stay server-side in `.auth/sessions.json` (0600). `GITHUB_APP_ID` + `GITHUB_APP_KEY` add
 `auth.clone_token(installation_id)`, a ~1 h token for `git clone https://x-access-token:<token>@github.com/...`;
-the app JWT is signed by `openssl`, so the no-dependency promise holds. `site/index.html` asks `/api/me` on
+the app JWT is signed by `openssl`, so the no-dependency promise holds. The frontend asks `/api/me` on
 boot: served by `serve.py` the real flow takes over, and on the static Cloudflare Pages copy the call 404s and
 the simulated preview stands.
 
-`site/` also contains `favicon.svg`, `robots.txt`, `sitemap.xml`, and `llms.txt`. It is a Cloudflare Pages project
-named `harness-report` (Pages URL `harness-report-927.pages.dev`; custom domains `harnessreport.com` and
-`www.harnessreport.com`). DNS for the domain is the Route 53 zone in the `operator` AWS profile. Edit the
-files and redeploy:
+`web/public/` holds `favicon.svg`, `robots.txt`, `sitemap.xml`, and `llms.txt`; the build copies them into
+`web/dist` beside the page. The site is a Cloudflare Pages project named `harness-report` (Pages URL
+`harness-report-927.pages.dev`; custom domains `harnessreport.com` and `www.harnessreport.com`). DNS for the
+domain is the Route 53 zone in the `operator` AWS profile. Build, then deploy the build:
 
 ```sh
-CLOUDFLARE_ACCOUNT_ID=49dbf7b45c8ebadc336657b6c73cbd8a npx -y wrangler pages deploy site --project-name=harness-report --commit-dirty=true
+npm --prefix web run build
+CLOUDFLARE_ACCOUNT_ID=49dbf7b45c8ebadc336657b6c73cbd8a npx -y wrangler pages deploy web/dist --project-name=harness-report --commit-dirty=true
 ```
+
+`web/dist` is generated and git-ignored, so it has to be built before a deploy.

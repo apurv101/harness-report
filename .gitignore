@@ -1,8 +1,10 @@
-work/
-runs/
+/work/
+/runs/
 .env
 __pycache__/
 .wrangler/
 .DS_Store
 .playwright-mcp/
 .auth/
+web/node_modules/
+web/dist/

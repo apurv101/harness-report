@@ -1,0 +1,66 @@
+/* The landing page: hero, example report, the three steps. */
+.hero { display: grid; grid-template-columns: 1.17fr 1fr; gap: 65px; padding: 96px 0 80px; align-items: center; }
+.hero h1 { margin: 23px 0 22px; font-size: clamp(54px, 6.2vw, 80px); font-weight: 550; line-height: 1.06; letter-spacing: -4.9px; }
+.hero h1 span { color: var(--brand); }
+.hero .hero-copy { font-size: 16px; color: var(--muted); max-width: 410px; line-height: 1.8; }
+.hero-buttons { display: flex; align-items: center; gap: 22px; margin-top: 30px; flex-wrap: wrap; }
+.hero-buttons .primary { padding: 14px 19px; font-size: 13px; min-height: 48px; }
+.hero-footnote { margin-top: 17px !important; color: var(--product-muted); font-size: 11px; }
+.hero-visual { position: relative; padding: 19px 0 14px; }
+.hero-visual::before { content: ''; position: absolute; inset: -58px -40px; background-image: radial-gradient(#a8c5ed80 .7px, transparent .7px); background-size: 15px 15px; mask-image: radial-gradient(ellipse, black 40%, transparent 71%); pointer-events: none; }
+
+.preview-window { position: relative; background: var(--card); border: 1px solid var(--brand-border); border-radius: 11px; box-shadow: 0 18px 45px -24px #294b7a24, 0 2px 5px #294b7a08; overflow: hidden; transform: rotate(-1deg); }
+.window-chrome { height: 42px; background: var(--surface-subtle); border-bottom: 1px solid var(--line-soft); display: flex; align-items: center; padding: 0 16px; gap: 5px; }
+.window-chrome > i { height: 6px; width: 6px; background: var(--brand-border); border-radius: 50%; }
+.window-chrome > span { margin-left: auto; font: 11px var(--mono); letter-spacing: .05em; color: var(--product-muted); }
+.preview-body { padding: 26px; }
+.preview-repo { display: flex; align-items: center; gap: 10px; font: 11px var(--mono); color: var(--product-muted); }
+.preview-title { display: flex; gap: 10px; align-items: center; justify-content: space-between; margin: 25px 0 20px; }
+.preview-title h3 { font-size: 20px; letter-spacing: -.5px; }
+.preview-check { display: flex; align-items: center; gap: 9px; font-size: 11px; padding: 10px 0; color: var(--product-muted); border-top: 1px solid var(--brand-soft); }
+.preview-check .ui-icon { width: 13px; height: 13px; color: var(--brand); }
+.preview-check > span:last-child { margin-left: auto; font: 11.5px var(--mono); color: var(--product-muted); }
+.preview-output { padding: 14px 16px; margin: 15px 0 17px; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--surface-subtle); }
+.preview-output > div { font: 11px var(--mono); color: var(--product-muted); letter-spacing: .08em; margin-bottom: 9px; }
+.preview-output code { font-size: 11.5px; color: var(--product-muted); line-height: 1.8; word-spacing: 4px; }
+.preview-caption { font-size: 11.5px; color: var(--product-muted); display: flex; align-items: center; gap: 7px; }
+.preview-caption .ui-icon { width: 13px; height: 13px; }
+
+.visual-caption { position: relative; display: flex; align-items: center; justify-content: center; gap: 8px; font: 11px var(--mono); color: var(--product-muted); margin-top: 24px; }
+.intro-line { display: flex; align-items: center; gap: 20px; justify-content: center; padding: 8px 0 31px; font-size: 11.5px; color: var(--product-muted); }
+.intro-line::before, .intro-line::after { content: ''; height: 1px; flex: 1; background: var(--line); }
+.intro-line span { letter-spacing: .09em; font-family: var(--mono); text-transform: uppercase; }
+
+.how-section { scroll-margin-top: 24px; padding-bottom: 57px; }
+.step-grid { display: grid; grid-template-columns: repeat(3, 1fr); padding-top: 3px; }
+.landing-step { padding: 19px 35px 6px 0; }
+.landing-step + .landing-step { padding-left: 35px; border-left: 1px solid var(--line); }
+.step-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 21px; }
+.step-num { font: 11px var(--mono); color: var(--product-muted); }
+.step-symbol { color: var(--product-muted); width: 21px; height: 21px; }
+.landing-step h3 { margin-bottom: 9px; font-size: 15px; }
+.landing-step p { font-size: 12px; color: var(--muted); max-width: 260px; line-height: 1.8; }
+.detail-section { border-top: 1px solid var(--line); padding: 48px 0 55px; display: grid; grid-template-columns: .9fr 1.6fr; gap: 75px; scroll-margin-top: 24px; }
+.detail-section h2 { font-size: 26px; margin-top: 12px; max-width: 275px; line-height: 1.25; }
+.feature-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 23px; padding-top: 6px; }
+.feature-list h3 { font-size: 12px; margin: 12px 0 8px; }
+.feature-list p { font-size: 11px; color: var(--muted); }
+.feature-list .ui-icon { color: var(--product-muted); }
+
+/* The minimal landing pass, which trims the sections above. */
+.hero { min-height: calc(100vh - 225px); gap: 90px; }
+.hero h1 { font-weight: 550; }
+.hero .hero-copy { max-width: none; }
+.hero-buttons { margin-top: 28px; }
+
+.preview-body { padding: 27px; }
+.preview-repo { font-size: 11px; }
+.evaluation-score { display: flex; flex-direction: column; margin: 28px 0 22px; }
+.evaluation-score > strong { font-size: 48px; font-weight: 500; letter-spacing: -2px; line-height: 1.2; }
+.evaluation-score > strong span { color: #9cabc0; font-size: 32px; }
+.evaluation-score > span { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.evaluation-row { display: flex; align-items: center; justify-content: space-between; padding: 13px 0; border-top: 1px solid var(--brand-soft); font-size: 12px; }
+.evaluation-footer { border-top: 1px solid var(--brand-soft); padding-top: 19px; font-size: 11.5px; color: var(--product-muted); }
+
+.simple-steps { display: flex; justify-content: space-between; gap: 25px; padding: 26px 0; border-top: 1px solid var(--line); font-size: 12px; color: var(--product-muted); }
+.simple-steps b { color: var(--product-muted); font: 11.5px var(--mono); margin-right: 14px; }

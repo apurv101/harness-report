@@ -1,0 +1,117 @@
+
+/* ------------------------------------------------------------------ *
+ *  Character layer.  Everything above is structure; this is the voice:
+ *  a display face, offset shadows instead of hairlines, the logo's own
+ *  constellation as wallpaper, and colour that actually means pass/fail.
+ * ------------------------------------------------------------------ */
+
+.wordmark, .hero h1, .product-page h2, .flow-heading h1, .success-heading h1,
+.evaluation-score > strong, .runs-view h1, .signin-card h2, .flow-sidebar h2 {
+  font-family: var(--display);
+  font-variation-settings: 'wdth' 88;
+}
+.wordmark { font-weight: 800; letter-spacing: -.5px; font-size: 19px; }
+.product-page h2, .flow-heading h1, .success-heading h1, .signin-card h2, .flow-sidebar h2 { font-weight: 700; }
+
+/* Eyebrows and labels go monospace — this is a measurement tool. */
+.eyebrow, .local-tag, .visual-caption, .intro-line span { font-family: var(--mono); font-weight: 500; }
+.eyebrow { border: 1.5px solid var(--product-ink); border-radius: 999px; padding: 5px 11px 5px 9px; display: inline-flex; background: var(--card); box-shadow: 2px 2px 0 var(--hard); }
+.status-dot { width: 7px; height: 7px; background: var(--zing); box-shadow: 0 0 0 0 var(--zing); animation: ping 2.4s ease-out infinite; }
+@keyframes ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--zing) 70%, transparent); } 70%, 100% { box-shadow: 0 0 0 7px transparent; } }
+
+/* Buttons: a hard offset that collapses under the press. */
+.ui-btn { border: 1.5px solid var(--product-ink); border-radius: 9px; background: var(--card); box-shadow: 3px 3px 0 var(--hard); font-weight: 550; transition: transform .12s cubic-bezier(.2,.9,.3,1.4), box-shadow .12s, background .15s; }
+.ui-btn:hover { background: var(--zing); color: var(--product-ink); transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--hard); }
+.ui-btn:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--hard); }
+.ui-btn.primary { background: var(--product-ink); border-color: var(--product-ink); color: var(--background); }
+.ui-btn.primary:hover { background: var(--brand); border-color: var(--product-ink); color: #fff; }
+.ui-btn:disabled { box-shadow: 0 0 0 var(--hard); transform: none; }
+:focus-visible { outline: 3px solid var(--brand); outline-offset: 3px; border-radius: 4px; }
+
+/* Hero: bigger, tighter, and the payoff word gets a marker stripe. */
+.hero h1 { font-weight: 800; letter-spacing: -3.2px; font-variation-settings: 'wdth' 82; }
+.hero h1 span { color: var(--zing-ink); background: linear-gradient(178.5deg, transparent 6%, var(--zing) 6%, var(--zing) 95%, transparent 95%); padding: 0 .08em; margin-left: -.08em; }
+.hero .hero-copy { font-size: 17px; }
+
+/* The logo's node-and-edge graph, blown up as wallpaper — a harness run *is* a graph. */
+.hero-visual::before { background-image: radial-gradient(color-mix(in srgb, var(--line-strong) 75%, transparent) .8px, transparent .8px); }
+.hero-graph { position: absolute; z-index: 0; width: 86%; left: -56%; top: -14%; color: var(--brand); opacity: .22; pointer-events: none; transform: rotate(-11deg); }
+.hero-graph path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw 1.9s .3s ease forwards; }
+.hero-graph circle { opacity: 0; animation: pop .5s ease forwards; transform-box: fill-box; transform-origin: center; }
+.hero-graph circle:nth-child(1) { animation-delay: .8s; } .hero-graph circle:nth-child(2) { animation-delay: .95s; }
+.hero-graph circle:nth-child(3) { animation-delay: 1.1s; } .hero-graph circle:nth-child(4) { animation-delay: 1.25s; }
+.hero-graph circle:nth-child(5) { animation-delay: 1.4s; } .hero-graph circle:nth-child(6) { animation-delay: 1.55s; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+@keyframes pop { from { opacity: 0; transform: scale(.3); } to { opacity: 1; transform: scale(1); } }
+
+/* A second card stacked behind the report, and the tilt restored. */
+.hero-visual::after { content: ''; position: absolute; inset: 34px 14px 28px; border: 1.5px solid var(--product-ink); border-radius: 13px; background: var(--surface-subtle); transform: rotate(2.4deg); z-index: 0; }
+.preview-window { position: relative; z-index: 1; transform: rotate(-1.6deg); border: 1.5px solid var(--product-ink); border-radius: 13px; box-shadow: 7px 7px 0 var(--hard); transition: transform .35s cubic-bezier(.2,.9,.3,1.2); }
+.preview-window:hover { transform: rotate(0deg) translateY(-3px); }
+.window-chrome { border-bottom: 1.5px solid var(--product-ink); background: var(--surface-subtle); }
+.window-chrome > i { height: 9px; width: 9px; border: 1.2px solid var(--product-ink); }
+.window-chrome > i:nth-child(1) { background: var(--flare); }
+.window-chrome > i:nth-child(2) { background: var(--zing); }
+.window-chrome > i:nth-child(3) { background: var(--product-ink); }
+.window-chrome > span { font-family: var(--mono); font-weight: 500; }
+
+/* The score is the product.  Treat it like the product. */
+.evaluation-score > strong { font-size: clamp(64px, 8vw, 92px); font-weight: 800; letter-spacing: -4px; line-height: .95; font-variation-settings: 'wdth' 80; }
+.evaluation-score > strong span { color: var(--product-muted); font-size: .45em; letter-spacing: -2px; }
+.evaluation-score > span { font: 500 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; margin-top: 10px; }
+.evaluation-row { border-top: 1.5px dashed var(--line-strong); font-size: 13px; }
+
+/* Pass and fail should not look alike. */
+.pass-label { background: var(--zing); color: var(--zing-ink); border: 1.2px solid var(--product-ink); font-weight: 600; font-size: 11px; padding: 3px 8px; border-radius: 999px; }
+.fail-label { background: var(--flare-soft); color: var(--flare); border: 1.2px solid var(--flare); font-weight: 600; border-radius: 999px; }
+
+/* Numbered steps, set big. */
+.simple-steps { border-top: 1.5px solid var(--product-ink); font-size: 14px; color: var(--text-secondary); align-items: center; }
+.simple-steps b { font-family: var(--display); font-size: 30px; font-weight: 800; color: var(--brand); margin-right: 12px; letter-spacing: -1.5px; vertical-align: -4px; }
+
+/* Cards and panels pick up the same hard edge. */
+.flow-card, .runs-view .run-table, .runs-view .empty-card { border: 1.5px solid var(--product-ink); border-radius: 13px; box-shadow: 5px 5px 0 var(--hard); }
+.repo-option { border: 1.5px solid var(--line-strong); border-radius: 9px; transition: transform .12s, box-shadow .12s, background .15s; }
+.repo-option:hover { background: var(--card); border-color: var(--product-ink); transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--hard); }
+.product-page input { border: 1.5px solid var(--line-strong); border-radius: 8px; background: var(--card); }
+.product-page input:focus { border-color: var(--brand); }
+.flow-step-circle { border-width: 1.5px; border-color: var(--product-ink); font-family: var(--mono); font-weight: 500; }
+.flow-steps .current .flow-step-circle { background: var(--brand); box-shadow: 3px 3px 0 var(--hard); }
+.flow-steps .complete .flow-step-circle { background: var(--zing); color: var(--zing-ink); }
+.success-symbol { background: var(--zing); color: var(--zing-ink); border: 1.5px solid var(--product-ink); box-shadow: 3px 3px 0 var(--hard); }
+.result-facts dd { font-family: var(--display); font-size: 30px; font-weight: 800; letter-spacing: -1.4px; color: var(--product-ink); }
+.check-progress > div { background: var(--zing); }
+.preview-notice { background: var(--zing); color: var(--zing-ink); border-bottom: 1.5px solid var(--product-ink); font-weight: 500; }
+.preview-notice strong { color: var(--zing-ink); }
+header.top { border-bottom: 1.5px solid var(--product-ink); }
+.product-footer { border-top: 1.5px solid var(--product-ink); font-family: var(--mono); }
+
+/* The run viewer earns the same colour language. */
+.runs-view { --ok: var(--zing-ink); --bad: var(--flare); --warn: #9a6b12; --user: var(--product-ink); --asst: var(--brand); --tool: #1f7a6b; }
+.runs-view h1 { font-weight: 800; letter-spacing: -1.4px; }
+.runs-view .pill { border-width: 1.2px; font-weight: 600; border-radius: 999px; }
+.runs-view .pill.ok { background: var(--zing); border-color: var(--product-ink); }
+.runs-view .pill.bad { background: var(--flare-soft); }
+.runs-view .run-table th { font-family: var(--mono); background: var(--surface-subtle); border-bottom: 1.5px solid var(--product-ink); }
+.runs-view tr.row:hover { background: var(--brand-soft); }
+.runs-view .msg { border-left: 3px solid transparent; padding-left: 10px; }
+.runs-view .msg.system { border-left-color: var(--sys); }
+.runs-view .msg.user { border-left-color: var(--product-ink); }
+.runs-view .msg.assistant { border-left-color: var(--asst); }
+.runs-view .msg.tool { border-left-color: var(--tool); }
+.runs-view .task { border-left-width: 4px; border-radius: 9px; }
+.runs-view nav.tabs button { font-family: var(--mono); font-size: 12.5px; }
+.runs-view nav.tabs button.on { border-bottom-width: 3px; }
+
+/* Everything arrives, rather than just being there. */
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.hero > div:first-child > * { animation: rise .65s cubic-bezier(.2,.8,.3,1) backwards; }
+.hero > div:first-child > *:nth-child(1) { animation-delay: .04s; }
+.hero > div:first-child > *:nth-child(2) { animation-delay: .12s; }
+.hero > div:first-child > *:nth-child(3) { animation-delay: .2s; }
+.hero > div:first-child > *:nth-child(4) { animation-delay: .28s; }
+.hero-visual { animation: rise .8s .18s cubic-bezier(.2,.8,.3,1) backwards; }
+.simple-steps > span { animation: rise .6s .36s cubic-bezier(.2,.8,.3,1) backwards; }
+
+@media (max-width: 780px) { .preview-window, .hero-visual::after { transform: none; } .hero-visual::after, .hero-graph { display: none; } .hero h1 { letter-spacing: -2.6px; } }
+@media (prefers-reduced-motion: reduce) { .hero-graph path { stroke-dashoffset: 0; } .hero-graph circle { opacity: 1; } .status-dot { animation: none; } }
