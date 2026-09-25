@@ -1,0 +1,60 @@
+# The pull-down.  Manual only, and it makes you type the domain: everything in this stack is
+# reproducible except the certificate's validation records and the CloudFront distribution's id,
+# and a destroy takes the site offline for as long as it takes to put it back (~20 minutes, most of
+# it CloudFront).
+#
+# What survives a destroy, deliberately:
+#   - the Route 53 zone (not managed here; it is looked up)
+#   - the state bucket (bootstrap.sh made it)
+#   - the SecureStrings' values — the parameters go, so run `./bootstrap.sh secrets` after the
+#     next apply
+# What does not: the runs bucket, the recipes bucket and the DynamoDB table.  The table is a derived
+# index that `./run.sh ddb sync` rebuilds from the run folders on the laptop; the buckets are not.
+name: destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type the domain to confirm (harnessreport.com)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-west-2
+  TF_IN_AUTOMATION: "1"
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: check the confirmation
+        run: |
+          [ "${{ inputs.confirm }}" = "harnessreport.com" ] || {
+            echo "confirmation did not match; nothing was destroyed"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+
+      # allow_data_destroy is what lets Terraform empty the runs and recipes buckets on the way out.
+      # It defaults to false, so an ordinary apply can never quietly make them disposable: the two
+      # buckets that hold real output can only be deleted by a run that asks for it here.
+      - name: terraform destroy
+        working-directory: infra
+        run: |
+          terraform init -input=false
+          terraform apply -input=false -auto-approve -var allow_data_destroy=true
+          terraform destroy -input=false -auto-approve -var allow_data_destroy=true

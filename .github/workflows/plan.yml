@@ -1,0 +1,88 @@
+# What a pull request gets: the frontend has to build and typecheck, the Terraform has to be
+# formatted and valid, and the plan is posted on the PR so a change to the stack is visible before
+# it is merged.  Nothing here can apply — the workflow withholds it, and the role's trust policy
+# allows the pull_request subject precisely so a plan can read state without a second credential.
+name: plan
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: plan-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  AWS_REGION: us-west-2
+  TF_IN_AUTOMATION: "1"
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - run: npm --prefix web run typecheck
+      - run: npm --prefix web run build
+
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # The Lambda is the repo's own files, so the only check that matters is that they parse on the
+      # runtime's interpreter.  There are no dependencies to install.
+      - name: compile
+        run: python -m compileall -q serve.py auth.py evals.py proxy.py lib lambda
+
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+
+      - run: terraform fmt -check -recursive
+      - run: terraform init -input=false
+      - run: terraform validate
+
+      - name: plan
+        run: |
+          set -o pipefail
+          terraform plan -input=false -no-color -out=tf.plan | tee plan.txt
+
+      - name: comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infra/plan.txt', 'utf8');
+            const clipped = plan.length > 60000 ? plan.slice(0, 60000) + '\n... (clipped)' : plan;
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '### terraform plan\n\n```terraform\n' + clipped + '\n```',
+            });

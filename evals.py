@@ -25,6 +25,10 @@ TASKSET, TASK = "aider_polyglot", "polyglot_python_bowling"
 REPO_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
 EVAL_ID = re.compile(r"^\d{8}T\d{6}-[a-z0-9.-]{1,12}$")
 
+# run.sh needs a Docker daemon and a writable tree, so a host that has neither says so instead of
+# raising.  HR_EVALS=off is the hosted API until the run plane lands (RUN-PLANE.md).
+ENABLED = (os.environ.get("HR_EVALS") or "on").strip().lower() not in ("0", "off", "false", "no")
+
 LOCK = threading.Lock()
 PROCS = {}      # eval id -> Popen, for evaluations this server process started
 LIVE = {}       # eval id -> incremental read state of the run's calls.jsonl

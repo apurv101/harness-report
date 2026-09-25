@@ -155,7 +155,7 @@ This splits the fleet policy in two, and the split is real:
 ## Architecture
 
 ```
-site (Cloudflare Pages)  ->  serve.py / API (Lambda + DDB)  ->  SQS  ->  runner EC2 (warm pool)
+site (S3 + CloudFront)   ->  serve.py / API (Lambda + DDB)  ->  SQS  ->  runner EC2 (warm pool)
                                      |                                        |
                                   run state                             one container per task
                                   (DynamoDB)                            + one proxy per run

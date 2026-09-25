@@ -3,8 +3,8 @@ import { getSession } from '../lib/api'
 import type { Session } from '../lib/types'
 
 /**
- * Served by serve.py, /api/me answers and real GitHub sign-in takes over; on the static
- * Cloudflare Pages copy it 404s and the simulated preview stands.
+ * Served by serve.py, /api/me answers and real GitHub sign-in takes over; on a static
+ * copy with no API behind it the call 404s and the simulated preview stands.
  */
 const SessionContext = createContext<Session | null>(null)
 /** serve.py answered at all — so runs are real, whether or not GitHub sign-in is configured.  null until known. */

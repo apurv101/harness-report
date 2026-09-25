@@ -242,6 +242,7 @@ class H(SimpleHTTPRequestHandler):
         path = self.path.partition("?")[0]
         parts = [unquote(p) for p in path.strip("/").split("/") if p]
         if parts[:2] != ["api", "evals"]: return self.json(404, {"error": "no such api route"})
+        if not evals.ENABLED: return self.json(503, {"error": "this server does not start runs; runs come from the run plane"})
         # The site's own pages only: a cross-site form or fetch carries another Origin (and cannot send JSON without CORS)
         origin = self.headers.get("Origin")
         if origin and urlsplit(origin).netloc != self.headers.get("Host"): return self.json(403, {"error": "cross-origin request"})

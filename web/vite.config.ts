@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// `npm run build` writes web/dist, which serve.py serves and wrangler deploys.
+// `npm run build` writes web/dist, which serve.py serves and the deploy workflow syncs to S3.
 // `npm run dev` serves the frontend on :5173 and passes the API through to a
 // `python3 serve.py` running on :8789, so sign-in and real runs work in dev.
 const API = 'http://127.0.0.1:8789'

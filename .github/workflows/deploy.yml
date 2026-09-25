@@ -1,0 +1,107 @@
+# main -> production, in the only order that works:
+#
+#   1. build the frontend, so an apply never runs against a build that does not compile
+#   2. terraform apply — the Lambda package is zipped by Terraform itself out of the repo's own
+#      files, so this is where an API change ships
+#   3. sync web/dist to the site bucket, hashed assets first and index.html last, so a browser
+#      never fetches a page that points at bundles the bucket does not have yet
+#   4. invalidate, and only the entry points: the hashed files are immutable by name
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time.  Two applies against one state file is what the lock is for, but queueing
+# here means the second one plans against the first one's result instead of failing on the lock.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-west-2
+  TF_IN_AUTOMATION: "1"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: build the frontend
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+
+      - name: terraform apply
+        working-directory: infra
+        run: |
+          terraform init -input=false
+          terraform apply -input=false -auto-approve
+
+      - name: read the outputs
+        id: tf
+        working-directory: infra
+        run: |
+          {
+            echo "bucket=$(terraform output -raw site_bucket)"
+            echo "distribution=$(terraform output -raw cloudfront_distribution_id)"
+            echo "url=$(terraform output -raw site_url)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: sync web/dist
+        env:
+          BUCKET: ${{ steps.tf.outputs.bucket }}
+        run: |
+          # Vite puts every hashed bundle under assets/ and nothing else there, so the split is the
+          # directory.  Assets go up first, and they are immutable by name: a year, no revalidation.
+          aws s3 sync web/dist "s3://$BUCKET" --delete \
+            --exclude "*" --include "assets/*" \
+            --cache-control "public, max-age=31536000, immutable"
+          # index.html, favicon.svg and the crawler files keep their names, so the browser must
+          # re-ask every time and CloudFront is what holds them.  This pass runs second: a page is
+          # never in place before the bundles it points at.
+          aws s3 sync web/dist "s3://$BUCKET" --delete \
+            --exclude "assets/*" \
+            --cache-control "public, max-age=0, s-maxage=300, must-revalidate"
+
+      - name: invalidate
+        env:
+          DISTRIBUTION: ${{ steps.tf.outputs.distribution }}
+        run: |
+          id=$(aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION" \
+                 --paths "/" "/index.html" "/robots.txt" "/sitemap.xml" "/llms.txt" \
+                 --query 'Invalidation.Id' --output text)
+          aws cloudfront wait invalidation-completed --distribution-id "$DISTRIBUTION" --id "$id"
+
+      - name: check it answers
+        env:
+          URL: ${{ steps.tf.outputs.url }}
+        run: |
+          # The page and the API, through CloudFront, as a browser would get them.  A deploy that
+          # leaves /api/runs returning HTML is the failure this catches.
+          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors -o /dev/null "$URL"
+          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors "$URL/api/runs" \
+            | head -c 200 | grep -q '^\[' || { echo "/api/runs did not return a JSON array"; exit 1; }
+          echo "$URL is up"

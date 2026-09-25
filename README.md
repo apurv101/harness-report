@@ -232,6 +232,42 @@ contents of `runs/`. A plain static host can display the frontend, but needs the
 
 ## Hosting
 
+Everything is AWS, in the `operator` account, and all of it is [`infra/`](infra/) — one Terraform root
+module that stands the stack up and takes it down. The site was on Cloudflare Pages until 2026-09-24; it
+moved because the frontend calls `/api/...` as a relative path and `serve.py` has no CORS, so the page and
+the API want one origin, and because `/raw/<run-id>/<file>` is S3 objects sitting next to the table the rest
+of the API reads.
+
+```
+harnessreport.com ─ Route 53 ─ CloudFront ─┬─ /*                    S3      web/dist
+                                           ├─ /api/* /auth/* /raw/* Lambda  serve.py
+                                           │                                ├─ DynamoDB  the run store
+                                           │                                └─ S3        runs, recipes
+                                           └─ edge function: www → apex, SPA fallback
+```
+
+The Lambda **is** `serve.py`: [`lambda/handler.py`](lambda/handler.py) turns the function URL event back
+into the bytes of an HTTP request, lets `serve.H` answer it, and turns what it wrote back into a response.
+Terraform zips the package out of the repo's own files, so there is no build step for the API and an apply
+ships whatever is committed. Three environment variables are all that differ from the laptop: `HR_SESSIONS=ddb`
+(sessions are rows — Lambda has no disk to share), `HR_EVALS=off` (starting a run needs a Docker daemon, so
+`POST /api/evals` answers 503 until the run plane lands) and `HR_PUBLIC_HOST`.
+
+```sh
+AWS_PROFILE=operator infra/bootstrap.sh state      # once: the state bucket
+AWS_PROFILE=operator terraform -chdir=infra init
+AWS_PROFILE=operator terraform -chdir=infra apply
+AWS_PROFILE=operator infra/bootstrap.sh secrets    # once: the values state is not allowed to hold
+```
+
+After that, pushing to `main` deploys: build → `terraform apply` → sync `web/dist` → invalidate → curl the
+page and `/api/runs` through CloudFront. Pull requests get a typecheck, a build, `terraform validate` and the
+plan as a comment. Credentials are OIDC, so CI holds no keys. `infra/README.md` has the rest — why the
+function URL is not behind OAC, where the secrets live, and what a destroy does and does not delete.
+
+The EC2 runner fleet from [RUN-PLANE.md](RUN-PLANE.md) is in `infra/runplane.tf` behind
+`enable_run_plane`, off by default until `hr-agentd` exists.
+
 ## Signing in with GitHub
 
 `auth.py` gives `serve.py` a "Sign in with GitHub" flow built on one **GitHub App** — the same app both
@@ -257,17 +293,9 @@ The browser only ever holds a signed session id (`HttpOnly`, `SameSite=Lax`, `Se
 tokens stay server-side in `.auth/sessions.json` (0600). `GITHUB_APP_ID` + `GITHUB_APP_KEY` add
 `auth.clone_token(installation_id)`, a ~1 h token for `git clone https://x-access-token:<token>@github.com/...`;
 the app JWT is signed by `openssl`, so the no-dependency promise holds. The frontend asks `/api/me` on
-boot: served by `serve.py` the real flow takes over, and on the static Cloudflare Pages copy the call 404s and
-the simulated preview stands.
+boot: served by `serve.py` the real flow takes over, and on a static copy with no API behind it the call 404s
+and the simulated preview stands.
 
 `web/public/` holds `favicon.svg`, `robots.txt`, `sitemap.xml`, and `llms.txt`; the build copies them into
-`web/dist` beside the page. The site is a Cloudflare Pages project named `harness-report` (Pages URL
-`harness-report-927.pages.dev`; custom domains `harnessreport.com` and `www.harnessreport.com`). DNS for the
-domain is the Route 53 zone in the `operator` AWS profile. Build, then deploy the build:
-
-```sh
-npm --prefix web run build
-CLOUDFLARE_ACCOUNT_ID=49dbf7b45c8ebadc336657b6c73cbd8a npx -y wrangler pages deploy web/dist --project-name=harness-report --commit-dirty=true
-```
-
-`web/dist` is generated and git-ignored, so it has to be built before a deploy.
+`web/dist` beside the page. `web/dist` is generated and git-ignored, so it has to be built before a deploy —
+which the deploy workflow does, so nobody has to remember.

@@ -25,6 +25,8 @@ Optional, only needed to clone private repos:
     GITHUB_APP_ID         the app's numeric id
     GITHUB_APP_KEY        path to the app's .pem private key
     GITHUB_APP_SLUG       the app's url slug, so the frontend can offer "install it on a repository"
+    HR_SESSIONS=ddb       keep sessions in the run store instead of .auth/sessions.json, for a
+                          deployment with more than one process and no disk between them
 """
 import base64, hashlib, hmac, json, os, secrets, subprocess, threading, time
 from urllib.parse import urlencode
@@ -58,6 +60,11 @@ SESSION_TTL = 30 * 24 * 3600            # a month; the GitHub token inside may e
 STATE_TTL = 600
 API = "https://api.github.com"
 STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".auth", "sessions.json")
+
+# HR_SESSIONS=ddb keeps sessions as rows in the run store instead of .auth/sessions.json.  One
+# process with a disk it owns is the laptop; the hosted copy is N Lambda instances with no disk
+# between them, and a session written by one of them has to be readable by the next.
+BACKEND = (os.environ.get("HR_SESSIONS") or "file").strip().lower()
 
 SESSIONS, LOCK = {}, threading.Lock()
 
@@ -122,6 +129,61 @@ def _save():
     os.replace(tmp, STORE)
 
 
+# ---------------------------------------------------------------- one session, either backend
+#
+# Three functions is the whole difference between the two.  A session carries its own `_sid` so
+# _fresh() can write a refreshed token back without the caller threading the id through; public()
+# whitelists what the frontend sees, so it never leaves the server.
+#
+# A session holds the user's GitHub token, so the ddb backend moves that token from a 0600 file on
+# one machine into a table row: encrypted at rest, reachable only by the role the API runs as, and
+# gone a day after the cookie stops being honoured.  That is the trade the hosted copy makes, and it
+# is the reason the table's IAM (infra/api.tf) is the four verbs it is and not `dynamodb:*`.
+
+def _rows():
+    """lib/ is on sys.path by the time serve.py imports this; the import is late so that a plain
+    `python3 -c "import auth"` still works with the file backend."""
+    import ddb
+    return ddb
+
+
+def _get(sid):
+    if BACKEND != "ddb":
+        _load()
+        return SESSIONS.get(sid)
+    rows = _rows()
+    try:
+        row = rows.get(f"SESSION#{sid}", "META")
+    except rows.Error as e:
+        # A table that is down signs people out; it does not take the site with it.
+        print(f"auth: session store unreachable: {e}", flush=True)
+        return None
+    return {k: v for k, v in row.items() if k not in ("pk", "sk", "ttl")} if row else None
+
+
+def _put(sess):
+    if BACKEND != "ddb":
+        with LOCK:
+            SESSIONS[sess["_sid"]] = sess
+            _save()
+        return
+    # DynamoDB expires the row itself, a day after the cookie the signature stops honouring.
+    _rows().put({"pk": f"SESSION#{sess['_sid']}", "sk": "META",
+                 "ttl": int(sess.get("expires", time.time() + SESSION_TTL)) + 86400, **sess})
+
+
+def _drop(sid):
+    if BACKEND != "ddb":
+        _load()
+        with LOCK:
+            if SESSIONS.pop(sid, None) is not None: _save()
+        return
+    rows = _rows()
+    # Best effort: the cookie is already cleared, and the row expires on its own ttl regardless.
+    try: rows.delete_partition(f"SESSION#{sid}")
+    except rows.Error as e: print(f"auth: could not drop session: {e}", flush=True)
+
+
 def _cookie(name, value, ttl):
     secure = "; Secure" if BASE_URL.startswith("https://") else ""
     age = f"; Max-Age={ttl}" if ttl else "; Max-Age=0"
@@ -145,18 +207,13 @@ def check_state(header, sent):
 
 
 def login(user):
-    _load()
     sid = secrets.token_urlsafe(32)
-    with LOCK:
-        SESSIONS[sid] = {**user, "expires": time.time() + SESSION_TTL}
-        _save()
+    _put({**user, "_sid": sid, "expires": time.time() + SESSION_TTL})
     return _cookie(COOKIE, sign(sid, SESSION_TTL), SESSION_TTL)
 
 
 def logout(sid):
-    _load()
-    with LOCK:
-        if SESSIONS.pop(sid, None) is not None: _save()
+    if sid: _drop(sid)
     return _cookie(COOKIE, "", 0)
 
 
@@ -176,17 +233,17 @@ def session_of(header):
     """The signed-in user for a request's Cookie: header, or None."""
     sid = session_id(header)
     if not sid: return None
-    _load()
-    sess = SESSIONS.get(sid)
+    sess = _get(sid)
     if not sess: return None
     if sess.get("expires", 0) < time.time():
-        with LOCK: SESSIONS.pop(sid, None); _save()
+        _drop(sid)
         return None
+    sess["_sid"] = sid
     return sess
 
 
 def public(sess):
-    """What the frontend is allowed to know about the session — never the token."""
+    """What the frontend is allowed to know about the session — never the token, never `_sid`."""
     return {k: sess.get(k) for k in ("login", "id", "name", "avatar")} if sess else None
 
 
@@ -228,10 +285,9 @@ def _fresh(sess):
                data={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET,
                      "grant_type": "refresh_token", "refresh_token": sess["refresh"]})
     if "access_token" not in tok: raise RuntimeError("github token expired, sign in again")
-    with LOCK:
-        sess.update(token=tok["access_token"], refresh=tok.get("refresh_token", sess["refresh"]),
-                    token_expires=time.time() + int(tok.get("expires_in", 28800)) - 60)
-        _save()
+    sess.update(token=tok["access_token"], refresh=tok.get("refresh_token", sess["refresh"]),
+                token_expires=time.time() + int(tok.get("expires_in", 28800)) - 60)
+    _put(sess)
     return sess["token"]
 
 
