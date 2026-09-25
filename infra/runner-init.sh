@@ -16,7 +16,7 @@ ANALYZER_MODEL=${analyzer_model}
 CLAUDE_CODE_USE_BEDROCK=1
 ENVFILE
 cat > /etc/harness-report.env <<'ENVFILE'
-PATH=/opt/hr-venv/bin:/root/.local/bin:/usr/local/bin:/usr/bin:/bin
+PATH=/opt/hr-venv/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 AWS_REGION=${region}
 AWS_DEFAULT_REGION=${region}
 HR_RUNNER_EC2=1

@@ -22,7 +22,8 @@ asynchronously invokes a small capacity-controller Lambda. The controller reads
 an atomic, strongly consistent `JOBS#ACTIVE` index in DynamoDB, counts distinct
 owners with queued/running work, and sets the fleet's desired capacity up to
 `runner_max_size` (default 4). Ten jobs from one user request one worker, not ten.
-Only one controller invocation runs at a time. A once-per-minute EventBridge
+An expiring DynamoDB lock serializes controller decisions without reserving Lambda
+concurrency (this account's quota does not permit reservations). A once-per-minute EventBridge
 invocation repairs missed wakeups and expires lost attempts; normal submissions
 do not wait for CloudWatch queue metrics or the next scheduled tick.
 
@@ -149,10 +150,11 @@ AWS_PROFILE=operator terraform -chdir=infra apply \
 
 # Obtain the destination with: terraform -chdir=infra output -raw runner_assets_bucket
 AWS_PROFILE=operator python3 infra/upload-tasks.py \
-  --bucket <runner-assets-bucket> --root ~/Desktop/harbor-tasks --all
+  --bucket <runner-assets-bucket> --root ~/Desktop/harbor-tasks --runnable-table harness-report
 ```
 
-You can replace `--all` with explicit taskset names for a limited staging setup.
+`--runnable-table` uploads the tasks currently offered by the live site. Repeat it
+after adding runnable tasks. Use `--all` for the whole corpus, or explicit taskset names.
 Every task the hosted site offers must be uploaded before accepting real runs.
 The worker downloads only the selected task, not the entire corpus.
 
@@ -168,10 +170,10 @@ already finished jobs, and deletes an old message only after FIFO accepts it.
 It refuses jobs still marked running or without a known owner. Review and settle
 such legacy attempts before retrying; it never silently restarts them.
 
-Then set `enable_run_plane=true`, `runner_dispatch_enabled=true`, and
-`runner_warm_pool=2` in the deployment's
-version-controlled configuration, review the plan, and apply. CI currently uses
-variable defaults; a local ignored `terraform.tfvars` does not configure CI.
+Production keeps `enable_run_plane=true`, `runner_dispatch_enabled=true`, and
+`runner_warm_pool=2` in the checked-in `infra/production.auto.tfvars`, which CI
+automatically loads. For a new environment, override dispatch to false until task
+uploads and migration are complete. A local ignored `terraform.tfvars` does not configure CI.
 Deploy the matching frontend through the existing deploy workflow as well.
 
 The initial lifecycle hook replaces the old Auto Scaling Group once; review that
@@ -223,6 +225,10 @@ IMDSv2 keeps its hop limit of one and the host blocks forwarded metadata traffic
 
 Use Session Manager and `journalctl -u hr-agentd` for worker diagnostics. The
 run attempt's console and events are also published to DynamoDB every two seconds.
+Retiring workers preserve their service journal under `workers/<instance-id>/service.log`
+in the private runs bucket, including failures before a job is claimed. The fleet
+uses an explicit launch-template version so each release refreshes stopped workers;
+the readiness hook, rather than an additional fixed warmup delay, gates execution.
 
 ## Verification
 

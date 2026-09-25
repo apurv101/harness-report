@@ -6,8 +6,38 @@ SQS depth is not demand: ten queued jobs from one owner still need only one slot
 """
 import os
 import time
+import uuid
+from contextlib import contextmanager
 
 import cloudqueue
+import ddb
+
+
+@contextmanager
+def controller_lock(name, seconds):
+    """Serialize decisions without Lambda reserved capacity (unavailable in small accounts).
+
+    Expiry exceeds this invocation's remaining runtime, so a timed-out invocation
+    cannot overlap its successor. Conditional release cannot delete a newer lock.
+    Contention raises so asynchronous wakeups and synchronous retirements retry.
+    """
+    key = {"pk": "WORKER#" + name, "sk": "CONTROLLER"}
+    token = uuid.uuid4().hex
+    now = time.time()
+    ddb.call("PutItem", {"TableName": ddb.table(),
+        "Item": ddb.row_of({**key, "token": token, "expires": now + seconds + 5}),
+        "ConditionExpression": "attribute_not_exists(pk) OR #expires < :now",
+        "ExpressionAttributeNames": {"#expires": "expires"},
+        "ExpressionAttributeValues": ddb.row_of({":now": now})})
+    try:
+        yield
+    finally:
+        try:
+            ddb.call("DeleteItem", {"TableName": ddb.table(), "Key": ddb.row_of(key),
+                "ConditionExpression": "#token = :token", "ExpressionAttributeNames": {"#token": "token"},
+                "ExpressionAttributeValues": ddb.row_of({":token": token})})
+        except ddb.Error as e:
+            if e.kind != "ConditionalCheckFailedException": raise
 
 
 def capacity(jobs, instances, maximum):
@@ -42,7 +72,9 @@ def reconcile(asg, name, retire=None, enabled=True):
 
 def handler(event, context):
     import boto3
-    result = reconcile(boto3.client("autoscaling"), os.environ["HR_ASG_NAME"], (event or {}).get("retire"),
-                       enabled=os.environ.get("HR_DISPATCH") == "1")
+    name = os.environ["HR_ASG_NAME"]
+    with controller_lock(name, context.get_remaining_time_in_millis() / 1000):
+        result = reconcile(boto3.client("autoscaling"), name, (event or {}).get("retire"),
+                           enabled=os.environ.get("HR_DISPATCH") == "1")
     print(result, flush=True)
     return result

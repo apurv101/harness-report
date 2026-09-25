@@ -31,7 +31,7 @@ task_image() {
 # the first task's image — the overlay is validated against it before any task runs.
 # Sets TSD TS_NAME TASKS FIRST_TASK_IMG FIRST_TASK_DF.
 select_tasks() {
-    TSD="$(taskset_dir "$TASKSET")"; TS_NAME="$(basename "$TSD" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_.-\n' '-')"
+    TSD="$(taskset_dir "$TASKSET")"; TS_NAME="$(basename "$TSD" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_.\n-' '-')"
     stage select "taskset $TS_NAME ($TSD)"
     if [ -n "$TASK_NAMES" ]; then
       IFS=, read -r -a WANT <<< "$TASK_NAMES"

@@ -257,8 +257,10 @@ resource "aws_autoscaling_group" "runner" {
   }
 
   launch_template {
-    id      = aws_launch_template.runner[0].id
-    version = "$Latest"
+    id = aws_launch_template.runner[0].id
+    # A concrete version makes release changes trigger the instance refresh below,
+    # including stopped standby machines that already downloaded an older bundle.
+    version = aws_launch_template.runner[0].latest_version
   }
 
   # Boot installs the release, then systemd starts the queue consumer.
@@ -269,6 +271,9 @@ resource "aws_autoscaling_group" "runner" {
   instance_refresh {
     strategy = "Rolling"
     preferences {
+      # The lifecycle hook already waits for the complete worker setup. Do not
+      # inherit the 15-minute EC2 health grace as an extra standby refresh delay.
+      instance_warmup              = 0
       min_healthy_percentage       = 100
       max_healthy_percentage       = 150
       scale_in_protected_instances = "Wait"

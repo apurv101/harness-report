@@ -140,7 +140,7 @@ command -v claude >/dev/null || die "claude CLI not found (the analyze stage run
 
 [[ "$URL" =~ github\.com[/:]([^/[:space:]]+)/([^/[:space:]#?]+) ]] || die "not a GitHub URL: $URL"
 OWNER="${BASH_REMATCH[1]}"; REPO="${BASH_REMATCH[2]%.git}"
-NAME="$(printf '%s-%s' "$OWNER" "$REPO" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9.-\n' '-')"
+NAME="$(printf '%s-%s' "$OWNER" "$REPO" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9.\n-' '-')"
 RUN_ID="${RUN_ID:-$(date +%Y%m%dT%H%M%S)}"
 [[ "$RUN_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]] || die "invalid run id"
 WORK="$DATA/work/$NAME"; IMAGE="hr-$NAME"

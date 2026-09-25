@@ -64,6 +64,17 @@ def ready():
 def retire():
     if not READY.exists(): return  # Normal warm-pool stop, no job has been accepted.
     iid = READY.read_text().strip()
+    # A failed readiness check can retire before any evaluation log exists. Keep
+    # its service journal after the disposable VM disappears.
+    bucket = os.environ.get("HR_RUNS_BUCKET")
+    if bucket:
+        try:
+            journal = subprocess.run(["journalctl", "-u", "hr-agentd", "--no-pager", "-n", "200"],
+                                     capture_output=True, check=True, timeout=10)
+            boto3.client("s3").put_object(Bucket=bucket, Key=f"workers/{iid}/service.log",
+                                         Body=journal.stdout, ContentType="text/plain")
+        except Exception as e:
+            print(f"could not archive worker diagnostics: {e}", flush=True)
     for attempt in range(5):
         try:
             result = boto3.client("lambda").invoke(FunctionName=os.environ["HR_SCALER_FUNCTION"],

@@ -73,5 +73,19 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(call["InvocationType"], "RequestResponse")
         self.assertEqual(call["Payload"], b'{"retire": "i-test"}')
 
+    def test_service_path_includes_linux_administration_tools(self):
+        script = Path(__file__).resolve().parents[1] / "infra/runner-init.sh"
+        path = next(line.removeprefix("PATH=") for line in script.read_text().splitlines() if line.startswith("PATH="))
+        self.assertIn("/usr/sbin", path.split(":"))
+
+    def test_retirement_preserves_diagnostics_even_without_a_claimed_job(self):
+        self.module.READY.write_text("i-test")
+        self.ssm.invoke.return_value = {"StatusCode": 200}
+        with patch.dict(self.module.os.environ, {"HR_SCALER_FUNCTION": "capacity", "HR_RUNS_BUCKET": "results"}), \
+                patch.object(self.module.subprocess, "run", return_value=SimpleNamespace(stdout=b"startup failed")):
+            self.module.retire()
+        self.ssm.put_object.assert_called_once_with(Bucket="results", Key="workers/i-test/service.log",
+                                                   Body=b"startup failed", ContentType="text/plain")
+
 
 if __name__ == "__main__": unittest.main()

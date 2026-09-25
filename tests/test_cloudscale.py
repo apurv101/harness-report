@@ -32,6 +32,32 @@ class Fleet:
 
 
 class CloudScaleTests(unittest.TestCase):
+    def test_controller_lock_releases_after_failure(self):
+        with patch.object(cloudscale.ddb, "call") as call, patch.object(cloudscale.time, "time", return_value=100):
+            with self.assertRaisesRegex(RuntimeError, "failed"):
+                with cloudscale.controller_lock("test", 30):
+                    raise RuntimeError("failed")
+        acquire, release = call.call_args_list
+        row = cloudscale.ddb.item_of(acquire.args[1]["Item"])
+        self.assertEqual(row["expires"], 135)
+        self.assertEqual(release.args[0], "DeleteItem")
+        self.assertEqual(release.args[1]["ExpressionAttributeValues"][":token"], {"S": row["token"]})
+
+    def test_contending_controller_cannot_work_or_release_other_lock(self):
+        conflict = cloudscale.ddb.Error("ConditionalCheckFailedException", "held")
+        with patch.object(cloudscale.ddb, "call", side_effect=conflict) as call:
+            with self.assertRaises(cloudscale.ddb.Error):
+                with cloudscale.controller_lock("test", 30):
+                    self.fail("contending controller entered")
+        self.assertEqual(call.call_count, 1)
+
+    def test_stale_controller_release_does_not_remove_successor(self):
+        conflict = cloudscale.ddb.Error("ConditionalCheckFailedException", "new owner")
+        with patch.object(cloudscale.ddb, "call", side_effect=[{}, conflict]) as call:
+            with cloudscale.controller_lock("test", 30):
+                pass
+        self.assertEqual(call.call_count, 2)
+
     def test_zero_to_parallel_and_idempotent_notifications(self):
         fleet = Fleet()
         jobs = [{"user": u, "status": "queued"} for u in ["alice", "ALICE", "alice", "bob"]]

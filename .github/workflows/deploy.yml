@@ -70,6 +70,16 @@ jobs:
             echo "url=$(terraform output -raw site_url)"
           } >> "$GITHUB_OUTPUT"
 
+      - name: check evaluation dispatch
+        run: |
+          # A healthy page alone does not mean queued evaluations can start.
+          aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names harness-report-runner \
+            --query 'AutoScalingGroups[0].AutoScalingGroupName' --output text \
+            | grep -qx harness-report-runner
+          aws events list-targets-by-rule --rule harness-report-worker-reconcile \
+            --query 'Targets[].Arn' --output text | grep -q ':function:harness-report-worker-capacity'
+
       - name: sync web/dist
         env:
           BUCKET: ${{ steps.tf.outputs.bucket }}

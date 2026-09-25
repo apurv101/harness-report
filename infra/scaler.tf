@@ -55,16 +55,18 @@ resource "aws_cloudwatch_log_group" "scaler" {
 }
 
 resource "aws_lambda_function" "scaler" {
-  count                          = local.runner
-  function_name                  = local.scaler_name
-  role                           = aws_iam_role.scaler[0].arn
-  runtime                        = "python3.13"
-  handler                        = "cloudscale.handler"
-  filename                       = data.archive_file.scaler[0].output_path
-  source_code_hash               = data.archive_file.scaler[0].output_base64sha256
-  timeout                        = 30
-  memory_size                    = 256
-  reserved_concurrent_executions = 1
+  count            = local.runner
+  function_name    = local.scaler_name
+  role             = aws_iam_role.scaler[0].arn
+  runtime          = "python3.13"
+  handler          = "cloudscale.handler"
+  filename         = data.archive_file.scaler[0].output_path
+  source_code_hash = data.archive_file.scaler[0].output_base64sha256
+  timeout          = 30
+  memory_size      = 256
+  # A DynamoDB lease serializes decisions without consuming reserved concurrency.
+  # This account's entire quota is the minimum AWS requires to remain unreserved.
+  reserved_concurrent_executions = -1
   environment {
     variables = {
       HR_TABLE    = var.table_name

@@ -12,7 +12,7 @@ cmd_oracle() {
   PLATFORM="${HR_PLATFORM:-linux/amd64}"; T0=$(date +%s)
   docker info >/dev/null 2>&1 || die "Docker is not running"
   local TSD TS_NAME t TDIR TIMG C S0 RC REWARD VERIF_T WORKDIR OUT="$HERE/catalog/oracle.jsonl" FAIL=0
-  TSD="$(taskset_dir "$TS")"; TS_NAME="$(basename "$TSD" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_.-\n' '-')"
+  TSD="$(taskset_dir "$TS")"; TS_NAME="$(basename "$TSD" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_.\n-' '-')"
   WORK="$HERE/work/oracle"; mkdir -p "$WORK" "$HERE/catalog"
   IFS=, read -r -a WANT <<< "$NAMES"
   for t in "${WANT[@]}"; do

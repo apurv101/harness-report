@@ -42,7 +42,7 @@ ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), Fixture).serve_forever()
     created_table = False
     os.environ.update(env)
     sys.path[:0] = [str(app), str(app / "lib")]
-    import cloudqueue, ddb, evals, leases
+    import cloudqueue, cloudscale, ddb, evals, leases
     try:
         queue_url = json.loads(command(["aws", "sqs", "create-queue", "--queue-name", name + ".fifo", "--region", "us-west-2",
             "--attributes", json.dumps({"FifoQueue":"true", "VisibilityTimeout":"30", "ReceiveMessageWaitTimeSeconds":"1"}),
@@ -51,6 +51,17 @@ ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), Fixture).serve_forever()
         command([sys.executable, str(app / "lib/store.py"), "table"], env=env); created_table = True
         print(f"Temporary AWS resources: {name} (profile {profile})", flush=True)
         # Exercise real transactions, not a mock of DynamoDB's condition evaluator.
+        with cloudscale.controller_lock(name, 30):
+            try:
+                with cloudscale.controller_lock(name, 30):
+                    raise AssertionError("two capacity controllers acquired the lock")
+            except ddb.Error as e:
+                assert e.kind == "ConditionalCheckFailedException", e
+        assert ddb.get("WORKER#" + name, "CONTROLLER") is None
+        ddb.put({"pk": "WORKER#" + name, "sk": "CONTROLLER", "token": "expired", "expires": time.time() - 1})
+        with cloudscale.controller_lock(name, 30):
+            assert ddb.get("WORKER#" + name, "CONTROLLER")["token"] != "expired"
+
         def capped(n):
             ev = evals._record("fixture/agent", evals._eid("fixture/agent"), "cap-test", "queued")
             try: return cloudqueue.enqueue(ev, daily_cap=3)

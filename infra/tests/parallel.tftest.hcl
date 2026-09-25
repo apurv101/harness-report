@@ -66,8 +66,8 @@ run "parallel_workers" {
     error_message = "Standby must contain stopped, unused VMs; used workers cannot return to the pool."
   }
   assert {
-    condition     = aws_lambda_function.scaler[0].reserved_concurrent_executions == 1 && aws_lambda_function.api.environment[0].variables.HR_SCALER_FUNCTION == "harness-report-worker-capacity"
-    error_message = "Submission must wake a serialized demand controller."
+    condition     = aws_lambda_function.scaler[0].reserved_concurrent_executions == -1 && aws_lambda_function.api.environment[0].variables.HR_SCALER_FUNCTION == "harness-report-worker-capacity"
+    error_message = "Submission must wake the controller without requiring reserved Lambda capacity."
   }
   assert {
     condition     = aws_lambda_function.api.environment[0].variables.HR_EVALS == "queue" && lookup(aws_lambda_function.api.environment[0].variables, "HR_LOCAL_USERS", "0") == "0"
