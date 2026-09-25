@@ -11,9 +11,11 @@ DynamoDB publisher — and a run must not be described differently depending on 
 """
 import ast, json, os, re
 
-TEST_LINE = re.compile(r"^(\S+::\S+)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b", re.M)
+TEST_LINE = re.compile(r"^(\S+::[^\n]+?)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b", re.M)
+# pytest -rA's "short test summary info": the only per-test lines a verifier that runs pytest without -v prints
+SHORT_LINE = re.compile(r"^(PASSED|FAILED|ERROR|XFAIL|XPASS) (\S+::\S+)(?: - .*)?$", re.M)
 TEST_SUMMARY = re.compile(r"^=+ (.*?(?:passed|failed|error)[^=]*?) in [\d.]+s .*=+$", re.M)
-FAIL_HEAD = re.compile(r"^_{1,}\s+(\S+)\s+_{1,}$", re.M)
+FAIL_HEAD = re.compile(r"^_+\s+(.+?)\s+_+$", re.M)
 
 
 def _read(path, default=None):
@@ -22,13 +24,25 @@ def _read(path, default=None):
     except OSError: return default
 
 
-def failure_details(out):
-    """pytest's FAILURES section split per test: {test_name: traceback text}."""
-    m = re.search(r"^=+ FAILURES =+$\n(.*?)(?=^=+ .* =+$)", out, re.M | re.S)
-    if not m: return {}
-    parts = FAIL_HEAD.split(m.group(1)); det = {}
-    for i in range(1, len(parts) - 1, 2): det[parts[i].split(".")[-1]] = parts[i + 1].strip()
-    return det
+def test_details(out, names):
+    """Keep complete pytest report blocks, including captured output, on the right test.
+
+    Class names and parameter IDs matter: two tests with the same function name must
+    never inherit each other's traceback. Ambiguous blocks remain in the suite log.
+    """
+    details = {}
+    sections = re.finditer(r"^=+ (?:FAILURES|ERRORS|PASSES|XFAILURES|XPASSES) =+\n(.*?)(?=^=+ .* =+$|\Z)", out, re.M | re.S)
+    for section in sections:
+        parts = FAIL_HEAD.split(section.group(1))
+        for i in range(1, len(parts) - 1, 2):
+            title, body = parts[i], parts[i + 1].strip()
+            label = re.sub(r"^ERROR at (?:setup|teardown) of ", "", title)
+            matches = [n for n in names if label in (n, ".".join(n.split("::")[1:]), n.split("::")[-1])]
+            if len(matches) > 1:
+                matches = [n for n in matches if re.search(r"^" + re.escape(n.split("::")[0]) + r":\d+:", body, re.M)]
+            if len(matches) == 1:
+                details.setdefault(matches[0], []).append(title + "\n" + body)
+    return {name: "\n\n".join(blocks) for name, blocks in details.items()}
 
 
 def test_sources(tdir):
@@ -56,11 +70,14 @@ def parse(d, full=False):
     result, its source from the task's tests folder, and its failure traceback."""
     out = _read(os.path.join(d, "verifier", "stdout.log"))
     if not out: return None
+    out = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", out).replace("\r\n", "\n")
     found = TEST_LINE.findall(out)
+    seen = {n for n, _ in found}
+    found += [(n, r) for r, n in SHORT_LINE.findall(out) if n not in seen]
     summ = TEST_SUMMARY.findall(out)
     # pytest aborted before running anything (e.g. a file the agent left behind failed at import): report that, not 0 tests
     aborted = re.search(r"^!+ Interrupted: (.*?) !+$", out, re.M)
-    if aborted:
+    if aborted and not found:
         bad = re.findall(r"^_+ ERROR collecting (\S+) _+$", out, re.M)
         return {"passed": 0, "failed": 0, "total": 0, "failed_names": [], "agent_written": 0, "cases": [] if full else None,
                 "aborted": aborted.group(1) + (": " + ", ".join(bad) if bad else ""), "summary": summ[-1] if summ else None}
@@ -84,9 +101,10 @@ def parse(d, full=False):
     passed = sum(1 for r in own.values() if r in ("PASSED", "XPASS"))
     res = {"passed": passed, "failed": len(failed), "total": len(own), "failed_names": failed, "agent_written": extra,
            "summary": summ[-1] if summ else None}
+    if aborted: res["aborted"] = aborted.group(1)
     if full:
-        det = failure_details(out); src = test_sources(tdir) if tdir else {}
-        res["cases"] = [{"name": n.split("::")[-1], "file": os.path.basename(n.split("::")[0]), "result": r,
-                         "own": n in own, "detail": det.get(n.split("::")[-1]),
-                         "source": src.get(os.path.basename(n.split("::")[0]), {}).get(n.split("::")[-1])} for n, r in by.items()]
+        det = test_details(out, by); src = test_sources(tdir) if tdir else {}
+        res["cases"] = [{"id": n, "name": "::".join(n.split("::")[1:]), "file": n.split("::")[0], "result": r,
+                         "own": n in own, "detail": det.get(n),
+                         "source": src.get(os.path.basename(n.split("::")[0]), {}).get(n.split("::")[-1].split("[")[0])} for n, r in by.items()]
     return res

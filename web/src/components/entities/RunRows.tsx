@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
 import { fmt } from '../../lib/format'
 import type { RunRow } from '../../lib/types'
-import { TestsCell } from '../runs/RunStatus'
 import { OutcomePill } from './Outcome'
 
 const seg = encodeURIComponent
@@ -14,7 +13,7 @@ export function RunRows({ runs, show }: { runs: RunRow[]; show: 'harness' | 'tas
       <table>
         <thead>
           <tr>
-            <th>Run</th><th>{show === 'harness' ? 'Harness' : 'Task'}</th><th>Result</th><th>Tests</th>
+            <th>Run</th><th>{show === 'harness' ? 'Harness' : 'Task'}</th><th>Verifier says</th>
             <th className="num">Calls</th><th className="num">Time</th>
           </tr>
         </thead>
@@ -26,8 +25,7 @@ export function RunRows({ runs, show }: { runs: RunRow[]; show: 'harness' | 'tas
               <td>{show === 'harness'
                 ? r.harness ? <Link to={`/harnesses/${seg(r.harness)}`}>{r.harness}</Link> : '—'
                 : r.task?.name ? <Link to={`/tasks/${seg(r.task.taskset || '')}/${seg(r.task.name)}`}>{r.task.taskset} / {r.task.name}</Link> : 'prompt'}</td>
-              <td><OutcomePill outcome={r.outcome} /></td>
-              <td><TestsCell tests={r.tests} /></td>
+              <td><OutcomePill run={r} /></td>
               <td className="num">{fmt(r.calls)}</td>
               <td className="num">{r.seconds == null ? '—' : `${r.seconds}s`}</td>
             </tr>

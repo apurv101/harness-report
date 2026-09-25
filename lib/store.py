@@ -19,7 +19,7 @@ single-table shape the accounting harness uses next door.
     EVALLIST                  EVAL#<eval-id>           an evaluation started from the site
     EVAL#<eval-id>            META                     eval.json, and run.sh's console output
     EVAL#<eval-id>            EVENT#<0000000001>       one stage event run.sh emitted for it
-    HARNESSLIST               HARNESS#<name>           the harness card: repo, latest recipe, runs, passes, per-task results
+    HARNESSLIST               HARNESS#<name>           the harness card: repo, latest recipe, runs, per-task results
     HARNESS#<name>            META                     the same card
     HARNESS#<name>            PROFILE                  what the harness is for (lib/profile.py): use case, domains, languages
     HARNESS#<name>            RECS                     the tests to run next, ranked (lib/recommend.py)
@@ -379,22 +379,44 @@ def publish_eval(eid):
 
 # ------------------------------------------------------------------ harnesses and tasks, as rows
 def _outcome(card):
-    """One run, as the one word a results grid shows."""
+    """One run, as the one word a results grid shows.  Deliberately not pass/fail: reward.txt means what each task's
+    verifier says it means (1/0 for all-tests-pass, a speedup with a floor of 1.0 for AlgoTune, a fraction for a
+    judge), so a finished run is `scored` and its reward and test summary are shown as written."""
     if card.get("status") == "running" or not card.get("finished"): return "running"
-    r = card.get("reward")
-    if r is None: return "error"
-    return "pass" if r == 1 else "fail"
+    return "error" if card.get("reward") is None else "scored"
+
+
+def _number(v):
+    try: return float(v)
+    except (TypeError, ValueError): return None
+
+
+def verifier_says(card):
+    """What the verifier reported for one run, in its own terms: the reward exactly as written, pytest's summary
+    line, and the verifier's exit status when it was not 0.  The one-line answer to "how did it do"."""
+    o = _outcome(card)
+    if o != "scored": return "running" if o == "running" else "no reward written"
+    t = card.get("tests") or {}
+    bits = [f"reward {card.get('reward')}"]
+    if t.get("aborted"): bits.append(f"tests stopped: {t['aborted']}")
+    elif t.get("summary"): bits.append(t["summary"])
+    elif t.get("total"): bits.append(f"{t.get('passed')} of {t.get('total')} tests passed")
+    if card.get("verifier_rc") not in (None, 0): bits.append(f"verifier exited {card['verifier_rc']}")
+    return " · ".join(bits)
 
 
 def results_of(cards, key):
-    """Fold run cards into {key(card): {runs, passes, last, last_run, last_outcome, best}}, oldest to newest."""
+    """Fold run cards into {key(card): {runs, scored, last, last_run, last_outcome, last_reward, last_tests,
+    best_reward}}, oldest to newest.  Rewards are only compared within one task, never summed across tasks."""
     out = {}
     for c in sorted(cards, key=lambda c: (c.get("started") or "", c.get("run") or "")):
         k = key(c)
         if not k: continue
-        r = out.setdefault(k, {"runs": 0, "passes": 0})
+        r = out.setdefault(k, {"runs": 0, "scored": 0, "best_reward": None})
         o = _outcome(c)
-        r["runs"] += 1; r["passes"] += o == "pass"
+        r["runs"] += 1; r["scored"] += o == "scored"
+        v = _number(c.get("reward"))
+        if v is not None and (r["best_reward"] is None or v > r["best_reward"]): r["best_reward"] = c.get("reward")
         r.update(last=c.get("started"), last_run=c.get("run"), last_outcome=o,
                  last_reward=c.get("reward"), last_tests=c.get("tests"))
     return out
@@ -411,13 +433,13 @@ def harness_card(name):
     h = latest.get("harness") or {}
     task_results = results_of([c for c in runs if c.get("kind") == "harbor"],
                               lambda c: f"{(c.get('task') or {}).get('taskset')}/{(c.get('task') or {}).get('name')}")
-    finished = [c for c in runs if _outcome(c) in ("pass", "fail", "error")]
+    finished = [c for c in runs if _outcome(c) != "running"]
     profile = strip(ddb.get(harness_pk(name), "PROFILE")) or None
     return {"harness": name, "repo": h.get("repo"), "commit": h.get("commit") or rec.get("commit"),
             "api_style": h.get("api_style") or rec.get("api_style"), "summary": rec.get("summary"),
             "recipe": rec.get("recipe"), "base_image": rec.get("base_image"), "recipes": len(recipes),
-            "runs": len(runs), "finished": len(finished), "passes": sum(1 for c in finished if _outcome(c) == "pass"),
-            "tasks_tried": len(task_results), "tasks_passed": sum(1 for r in task_results.values() if r["passes"]),
+            "runs": len(runs), "finished": len(finished), "scored": sum(1 for c in finished if _outcome(c) == "scored"),
+            "tasks_tried": len(task_results),
             "tasksets": sorted({k.split("/")[0] for k in task_results}), "results": task_results,
             "first_run": min((c.get("started") for c in runs if c.get("started")), default=None),
             "last_run": latest.get("started"), "last_run_id": latest.get("run"),
@@ -666,6 +688,28 @@ def file_text(rid, name):
     """One stored file's text, for /raw/<run-id>/<file> when the folder is not on this machine."""
     row = ddb.get(run_pk(rid), f"FILE#{name}")
     return row.get("text") if row else None
+
+
+def archived_file_url(rid, name):
+    """Open the original archive, rather than the size-limited DynamoDB preview.
+
+    Older runs may only exist in the table. A missing object falls back to that
+    preview; an AWS error must not quietly masquerade as a missing archive.
+    """
+    bucket = os.environ.get("HR_RUNS_BUCKET")
+    if not bucket: return None
+    import boto3
+    from botocore.exceptions import ClientError
+    client = boto3.client("s3")
+    key = f"runs/{rid}/{name}"
+    try: client.head_object(Bucket=bucket, Key=key)
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "NotFound"): return None
+        raise
+    return client.generate_presigned_url("get_object", Params={
+        "Bucket": bucket, "Key": key,
+        "ResponseContentType": "application/json" if name.endswith(".json") else "text/plain; charset=utf-8",
+    }, ExpiresIn=300)
 
 
 # ------------------------------------------------------------------ CLI

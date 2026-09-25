@@ -37,8 +37,8 @@ export function HarnessPage() {
       </div>
       <Facts>
         <Fact name="runs" value={h.runs} />
-        <Fact name="passed" value={`${h.passes} of ${h.finished}`} />
-        <Fact name="tasks passed" value={`${h.tasks_passed} of ${h.tasks_tried}`} />
+        <Fact name="with a reward" value={`${h.scored ?? 0} of ${h.finished}`} />
+        <Fact name="tasks tried" value={h.tasks_tried} />
         <Fact name="tasksets" value={(h.tasksets || []).join(', ')} />
         <Fact name="api" value={h.api_style} />
         <Fact name="model" value={(h.models || []).map(shortModel).join(', ')} />
@@ -56,7 +56,7 @@ export function HarnessPage() {
       {results.length ? (
         <div className="run-table" role="region" aria-label="Results by task" tabIndex={0}>
           <table>
-            <thead><tr><th>Task</th><th>Result</th><th>Last run</th></tr></thead>
+            <thead><tr><th>Task</th><th>Verifier says (latest run)</th><th>Last run</th></tr></thead>
             <tbody>
               {results.map(([key, o]) => {
                 const [ts, task] = key.split('/')

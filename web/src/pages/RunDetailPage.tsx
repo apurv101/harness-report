@@ -2,7 +2,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { LoadError } from '../components/runs/LoadError'
 import { OriginFacts, ResultFacts } from '../components/runs/RunFacts'
 import { RunsShell } from '../components/runs/RunsShell'
-import { KindPill, RewardCell, StatusPill, TestsCell } from '../components/runs/RunStatus'
+import { KindPill, StatusPill, VerifierSays } from '../components/runs/RunStatus'
 import { RunTabs, type Tab } from '../components/runs/RunTabs'
 import { CallsTab } from '../components/runs/tabs/CallsTab'
 import { FilesTab } from '../components/runs/tabs/FilesTab'
@@ -10,6 +10,7 @@ import { LogsTab } from '../components/runs/tabs/LogsTab'
 import { RecipeTab } from '../components/runs/tabs/RecipeTab'
 import { RunJsonTab } from '../components/runs/tabs/RunJsonTab'
 import { TimelineTab } from '../components/runs/tabs/TimelineTab'
+import { TestsTab } from '../components/runs/tabs/TestsTab'
 import { TrajectoryTab } from '../components/runs/tabs/TrajectoryTab'
 import { VerifierTab } from '../components/runs/tabs/VerifierTab'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
@@ -36,7 +37,9 @@ export function RunDetailPage() {
     { id: 'all', label: 'Timeline', count: bundle.calls.length + (bundle.egress?.length || 0),
       panel: () => <TimelineTab bundle={bundle} live={live} /> },
     { id: 'traj', label: 'Trajectory', panel: () => <TrajectoryTab calls={bundle.calls} /> },
-    { id: 'calls', label: 'Calls', count: bundle.calls.length, panel: () => <CallsTab calls={bundle.calls} /> },
+    { id: 'calls', label: 'Calls', count: bundle.calls.length, panel: () => <CallsTab calls={bundle.calls} run={bundle.run} trimmed={bundle.calls_trimmed} /> },
+    ...(harbor ? [{ id: 'tests', label: 'Tests', count: bundle.verifier?.tests?.cases?.length,
+      panel: () => <TestsTab key={bundle.run} bundle={bundle} /> }] : []),
     ...(harbor ? [{ id: 'verifier', label: 'Verifier', panel: () => <VerifierTab bundle={bundle} /> }] : []),
     { id: 'logs', label: 'Logs', panel: () => <LogsTab bundle={bundle} /> },
     { id: 'recipe', label: 'Recipe', panel: () => <RecipeTab bundle={bundle} /> },
@@ -59,10 +62,7 @@ export function RunDetailPage() {
         {harbor && run.task?.name && <> · <Link to={`/tasks/${seg(run.task.taskset || '')}/${seg(run.task.name)}`}>{run.task.taskset} / {run.task.name}</Link></>}
         {' · '}<StatusPill run={run} />
         {live && <> · <span className="tl-live">● following, updating every 3s</span></>}
-        {harbor && <>
-          {' · reward '}<RewardCell run={run} />
-          {(run.tests?.total || run.tests?.aborted) ? <>{' · tests '}<TestsCell tests={run.tests} /></> : null}
-        </>}
+        {harbor && <>{' · '}<VerifierSays run={run} /></>}
       </div>
 
       <OriginFacts bundle={bundle} />

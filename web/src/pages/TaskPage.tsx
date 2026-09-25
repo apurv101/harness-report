@@ -24,7 +24,7 @@ export function TaskPage() {
   if (!data) return <RunsShell crumb={crumb}><p className="empty" role="status">Loading…</p></RunsShell>
 
   const t = data.task
-  const results = Object.entries(t.results || {}).sort(([, a], [, b]) => b.passes - a.passes)
+  const results = Object.entries(t.results || {}).sort(([, a], [, b]) => (b.last || '').localeCompare(a.last || ''))
   const run = new URLSearchParams({ ...(repo ? { repo } : {}), taskset: t.taskset, task: t.task })
   return (
     <RunsShell crumb={crumb}>
@@ -46,7 +46,7 @@ export function TaskPage() {
       {results.length ? (
         <div className="run-table" role="region" aria-label="Results by harness" tabIndex={0}>
           <table>
-            <thead><tr><th>Harness</th><th>Result</th><th>Last run</th></tr></thead>
+            <thead><tr><th>Harness</th><th>Verifier says (latest run)</th><th>Last run</th></tr></thead>
             <tbody>
               {results.map(([h, o]) => (
                 <tr key={h}>

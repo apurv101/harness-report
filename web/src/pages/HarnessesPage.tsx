@@ -10,7 +10,7 @@ import { useJSON } from '../hooks/useJSON'
 import { getHarnesses } from '../lib/api'
 import { truncate } from '../lib/format'
 
-/** Every harness that has been run here, most passes first. */
+/** Every harness that has been run here, in the order the server lists them (most runs first). */
 export function HarnessesPage() {
   useDocumentTitle('Harnesses · Harness Report')
   const [query, setQuery] = useState('')
@@ -34,7 +34,7 @@ export function HarnessesPage() {
       {rows.length ? (
         <div className="run-table" role="region" aria-label="Harnesses" tabIndex={0}>
           <table>
-            <thead><tr><th>Harness</th><th>What it is for</th><th className="num">Runs</th><th className="num">Passed</th><th className="num">Tasks passed</th><th>Last run</th></tr></thead>
+            <thead><tr><th>Harness</th><th>What it is for</th><th className="num">Runs</th><th className="num">Tasks tried</th><th>Last run</th></tr></thead>
             <tbody>
               {rows.map(h => (
                 <tr key={h.harness}>
@@ -42,8 +42,7 @@ export function HarnessesPage() {
                     {h.repo && <span className="run-id">{h.repo.replace('https://github.com/', '')}</span>}</td>
                   <td className="run-task">{truncate(h.use_case || h.summary || '', 110)}</td>
                   <td className="num">{h.runs}</td>
-                  <td className="num">{h.passes}</td>
-                  <td className="num">{h.tasks_passed}/{h.tasks_tried}</td>
+                  <td className="num">{h.tasks_tried}</td>
                   <td className="mono small">{(h.last_run || '').slice(0, 10)}</td>
                 </tr>
               ))}

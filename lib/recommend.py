@@ -120,7 +120,7 @@ def candidates():
 
 # ------------------------------------------------------------------ rules
 def rank_rules(prof, results, pool, top=TOP):
-    """Domain first, then language, then a new taskset over one already tried, and never a task it already passed.
+    """Domain first, then language, then a new taskset over one already tried, and never a task it already has a reward on.
     One pick per taskset before a second from any, so five recommendations cover five kinds of work."""
     doms = prof.get("domains") or []
     langs = set(prof.get("languages") or [])
@@ -130,7 +130,7 @@ def rank_rules(prof, results, pool, top=TOP):
     for c in pool:
         key = f"{c['taskset']}/{c['task']}"
         r = results.get(key) or {}
-        if r.get("passes"): continue
+        if r.get("scored"): continue
         s, why = 0.0, []
         if c["domain"] in doms:
             s += 4 - doms.index(c["domain"]); why.append(f"{c['domain']} is what it is built for")
@@ -140,7 +140,7 @@ def rank_rules(prof, results, pool, top=TOP):
         if overlap: s += 0.5 * len(overlap)
         if c["taskset"] not in tried_ts:
             s += 1.5; why.append("a taskset it has not tried")
-        if r.get("runs"): s -= 2; why.append("failed before — worth a retry after a fix")
+        if r.get("runs"): s -= 2; why.append("ran before without a reward — worth a retry after a fix")
         if c["domain"] not in doms and not (c["language"] and c["language"] in langs): s -= 1
         scored.append((s, c, why))
     scored.sort(key=lambda x: (-x[0], x[1]["taskset"], x[1]["task"]))
@@ -166,16 +166,19 @@ def rank_llm(name, prof, results, pool, top=TOP):
     card = store.harness(name) or {}
     brief = {"harness": name, "profile": {k: prof.get(k) for k in ("use_case", "domains", "languages", "capabilities", "not_for")},
              "how_it_runs": (card.get("summary") or "")[:800],
-             "results_so_far": {k: {"runs": v.get("runs"), "passes": v.get("passes"), "last": v.get("last_outcome"),
+             "results_so_far": {k: {"runs": v.get("runs"), "last": v.get("last_outcome"), "last_reward": v.get("last_reward"),
+                                    "best_reward": v.get("best_reward"),
                                     "tests": (v.get("last_tests") or {}).get("summary")} for k, v in results.items()},
              "candidates": [{k: c[k] for k in ("taskset", "task", "domain", "language", "difficulty", "traits", "instruction")}
-                            | {"harnesses_tried": len(c["results"]), "harnesses_passed": sum(1 for v in c["results"].values() if v.get("passes"))}
+                            | {"harnesses_tried": len(c["results"])}
                             for c in pool]}
     prompt = (f"You pick the next {top} benchmark tasks for the author of an AI agent harness to run, from the candidates "
               "below (use their exact taskset and task strings). Choose what tells the author the most about how the "
               "harness does at what it is FOR: cover its main domains and languages first, prefer tasksets it has not "
-              "tried, step up in difficulty where it already passes, include a task it failed only if a retry would "
-              "teach something, and never one it already passed. Spread across tasksets. For each, one sentence of why, "
+              "tried, step up in difficulty where its tests already pass, and never pick a task it already has a reward on. "
+              "A reward is whatever that task's verifier wrote and means different things per taskset (1/0 for all "
+              "tests passing, a speedup with a floor of 1 for AlgoTune, a fraction for a judge), so read the test "
+              "summary alongside it, not the number alone. Spread across tasksets. For each, one sentence of why, "
               "addressed to the author.\n\n" + json.dumps(brief))
     model = os.environ.get("RECOMMEND_MODEL") or "haiku"
     p = subprocess.run(["claude", "-p", prompt, "--output-format", "json", "--json-schema", json.dumps(RANK_SCHEMA),
@@ -187,7 +190,7 @@ def rank_llm(name, prof, results, pool, top=TOP):
     recs = []
     for r in so.get("recs") or []:
         c = valid.get((r.get("taskset"), r.get("task")))
-        if not c or (results.get(f"{c['taskset']}/{c['task']}") or {}).get("passes"): continue
+        if not c or (results.get(f"{c['taskset']}/{c['task']}") or {}).get("scored"): continue
         if any(x["task"] == c["task"] and x["taskset"] == c["taskset"] for x in recs): continue
         recs.append({"taskset": c["taskset"], "task": c["task"], "why": r.get("why"), "score": None,
                      "domain": c["domain"], "language": c["language"]})

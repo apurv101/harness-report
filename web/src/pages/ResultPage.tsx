@@ -31,16 +31,21 @@ function LiveResult({ id }: { id: string }) {
 
   const ev = state.eval; const r = state.result; const t = r?.tests
   const title = taskTitle(ev.task)
-  const passed = ev.status === 'done' && r?.reward === 1
+  // No pass/fail: the reward is whatever this task's verifier wrote, and only the task knows what it means
+  // (AlgoTune writes 1.0 even for an invalid solution).  So the page reports it as written, next to the tests.
+  const done = ev.status === 'done'
+  const scored = done && r?.reward != null
   const { details, error: stopped } = progress(events, state.live, state)
   const heading = ev.status === 'cancelled' ? 'Run cancelled.'
     : ev.status === 'failed' ? 'The run stopped before the tests.'
-    : passed ? 'First task passed.' : 'First task finished.'
-  const sub = ev.status === 'done' && t?.total ? `${title} · ${t.passed} of ${t.total} tests passed`
+    : scored ? 'First task finished.' : 'First task finished without a reward.'
+  const said = [t?.aborted ? `tests stopped: ${t.aborted}` : t?.summary || (t?.total ? `${t.passed} of ${t.total} tests passed` : null),
+    r?.verifier_rc != null && r.verifier_rc !== 0 ? `verifier exited ${r.verifier_rc}` : null].filter(Boolean).join(' · ')
+  const sub = done ? `${title} · ${said || ev.taskset}`
     : stopped ? `${title} · ${stopped}` : `${title} · ${ev.taskset}`
   const facts: [string, string][] = [
-    ['TASK RESULT', ev.status !== 'done' ? '—' : passed ? 'Passed' : 'Failed'],
-    ['TESTS', t?.total ? `${t.passed}/${t.total}` : '—'],
+    ['REWARD', scored ? String(r!.reward) : '—'],
+    ['TESTS', t?.total ? `${t.passed}/${t.total} passed` : '—'],
     ['MODEL CALLS', String(r?.calls ?? state.live.calls)],
     ['AGENT TIME', r?.seconds != null ? `${r.seconds}s` : '—'],
   ]
@@ -50,14 +55,14 @@ function LiveResult({ id }: { id: string }) {
   return (
     <FlowLayout step={4}>
       <div className="success-heading">
-        <span className="success-symbol"><Icon name={passed ? 'check' : 'terminal'} /></span>
+        <span className="success-symbol"><Icon name={scored ? 'check' : 'terminal'} /></span>
         <div><h1 tabIndex={-1}>{heading}</h1><p>{sub}</p></div>
       </div>
       <SelectedRepo repo={ev.repo || repo!} />
       <div className="flow-card">
         <div className="result-banner">
           <strong>{title}</strong>
-          <span className="pass-label">{passed ? <><Icon name="check" /> Passed</> : ev.status === 'done' ? 'Not passed' : ev.status}</span>
+          <span className="pass-label" title="as the task's verifier wrote it to reward.txt">{scored ? `reward ${r!.reward}` : done ? 'no reward' : ev.status}</span>
         </div>
         <div className="result-details">
           <dl className="result-facts" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
@@ -77,6 +82,7 @@ function LiveResult({ id }: { id: string }) {
       </div>
       <div className="result-links">
         {r && <Link className="text-link" to={`/runs/${encodeURIComponent(ev.run)}`}>Open the full run</Link>}
+        {r && <Link className="text-link" to={`/runs/${encodeURIComponent(ev.run)}?tab=tests`}>View all tests and logs</Link>}
         <a className="text-link" href={evalConsoleURL(id)} target="_blank" rel="noopener">Console log</a>
         <button onClick={() => { setEval(null); navigate('/check') }}>Run again</button>
         {ev.harness && <Link to={`/harnesses/${encodeURIComponent(ev.harness)}`} className="text-link">Harness page</Link>}

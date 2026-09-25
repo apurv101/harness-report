@@ -155,6 +155,34 @@ def bundle(d):
             "verifier": verified, "files": files, "files_omitted": 0, "source": "files", "truncated": []}
 
 
+# A function url answers with at most 6 MB, base64-encoded, so about 4.7 MB of JSON.  Every request of an agent loop
+# carries the whole conversation so far, so a long run's calls outgrow that long before anything else does.
+BUNDLE_MAX = int(os.environ.get("HR_BUNDLE_MAX_BYTES") or (4_000_000 if os.environ.get("AWS_LAMBDA_FUNCTION_NAME") else 0))
+KEEP_FIELD = 2_000
+
+
+def fit_bundle(b, limit=None):
+    """A bundle that fits `limit` bytes of JSON.  Over it, every call but the last loses the request fields bigger
+    than KEEP_FIELD (the messages, the tools), then the same of its response; `request_trimmed` / `response_trimmed`
+    keep what was there, and `calls_trimmed` counts the calls cut.  The last call stays whole: its request plus its
+    response is the full conversation, which is what the trajectory is drawn from.  calls.jsonl has everything."""
+    limit = BUNDLE_MAX if limit is None else limit
+    if not limit or len(json.dumps(b)) <= limit: return b
+    calls = [dict(c) for c in b.get("calls") or []]
+    for field in ("request", "response"):
+        for c in calls[:-1]:
+            v = c.get(field)
+            if not isinstance(v, dict): continue
+            big = {k for k, x in v.items() if len(json.dumps(x)) > KEEP_FIELD}
+            if not big: continue
+            c[field] = {k: x for k, x in v.items() if k not in big}
+            c[f"{field}_trimmed"] = {"fields": sorted(big), "bytes": len(json.dumps(v)),
+                                    "messages": len(v.get("messages") or v.get("input") or []) if isinstance(v.get("messages") or v.get("input"), list) else None}
+        out = {**b, "calls": calls, "calls_trimmed": sum(1 for c in calls if c.get("request_trimmed") or c.get("response_trimmed"))}
+        if len(json.dumps(out)) <= limit: return out
+    return out
+
+
 class H(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *a): sys.stderr.write("%s %s\n" % (self.address_string(), fmt % a))
 
@@ -387,9 +415,9 @@ class H(SimpleHTTPRequestHandler):
                 b = from_table(store.run_bundle, parts[2])
                 # A run still being written is read from the folder it is being written into: the table has its card
                 # from the moment it starts, but the calls, the logs and the files are only published at the end.
-                if b and (b["run_json"].get("finished") or not find_run(parts[2])): return self.json(200, b)
+                if b and (b["run_json"].get("finished") or not find_run(parts[2])): return self.json(200, fit_bundle(b))
                 d = find_run(parts[2])
-                return self.json(200, bundle(d)) if d else self.json(404, {"error": "no such run"})
+                return self.json(200, fit_bundle(bundle(d))) if d else self.json(404, {"error": "no such run"})
             if parts[1:2] == ["github"]:
                 if not sess: return self.json(401, {"error": "sign in with github"})
                 if sess.get("local"): return self.json(200, [])
@@ -422,14 +450,21 @@ class H(SimpleHTTPRequestHandler):
             parts = bare
             return self.page_route(parts, q, fmt)
         if parts[:1] == ["raw"] and len(parts) >= 3:
+            if any(p in (".", "..") or "/" in p or "\\" in p for p in parts[1:]):
+                return self.send(400, "invalid file path", "text/plain")
             d = find_run(parts[1]); p = os.path.realpath(os.path.join(d or "", *parts[2:]))
             if not d or not p.startswith(os.path.realpath(d) + os.sep) or not os.path.isfile(p):
+                try: archived = store.archived_file_url(parts[1], "/".join(parts[2:]))
+                except Exception:
+                    return self.send(503, "The complete log could not be loaded. Please try again.", "text/plain")
+                if archived: return self.redirect(archived)
                 # no folder on this machine (a run synced from elsewhere): the stored text of the file, if it is stored
                 text = from_table(store.file_text, parts[1], "/".join(parts[2:]))
                 if text is None: return self.send(404, "not found", "text/plain")
                 return self.send(200, text, "text/plain; charset=utf-8")
             ctype = "application/json" if p.endswith(".json") else "text/plain; charset=utf-8"
-            return self.send(200, open(p, "rb").read(), ctype)
+            with open(p, "rb") as source: contents = source.read()
+            return self.send(200, contents, ctype)
         # Anything the build wrote (hashed bundles, favicon, robots.txt) is served as-is.
         root = os.path.realpath(DIST)
         asset = os.path.realpath(os.path.join(root, *parts)) if parts else ""

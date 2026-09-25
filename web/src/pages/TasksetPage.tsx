@@ -68,7 +68,7 @@ export function TasksetPage() {
                   <td className="small">{t.difficulty || '—'}</td>
                   <td className="small">{t.language || '—'}</td>
                   <td>{t.runnable ? <Pill tone="ok">runnable</Pill> : t.compose ? <Pill tone="warn">multi-container</Pill> : '—'}</td>
-                  <td className="num">{res.length ? `${res.filter(r => r.passes).length}/${res.length} passed` : '—'}</td>
+                  <td className="num">{res.length || '—'}</td>
                 </tr>
               )
             })}

@@ -25,7 +25,7 @@ sys.path.insert(0, HERE)
 import store                                                           # noqa: E402
 
 BASE = os.environ.get("HR_PUBLIC_URL") or "https://harnessreport.com"
-RUN_FIELDS = ("run", "started", "finished", "status", "kind", "harness", "task", "model", "reward", "tests",
+RUN_FIELDS = ("run", "started", "finished", "status", "kind", "harness", "task", "model", "reward", "verifier_rc", "tests",
               "calls", "seconds", "input_tokens", "output_tokens", "errors", "last_action")
 
 
@@ -40,12 +40,13 @@ def run_row(c):
     t = c.get("task") or {}
     out["task"] = {"taskset": t.get("taskset"), "name": t.get("name")} if t.get("name") else None
     out["outcome"] = store._outcome(c)
+    out["verifier_says"] = store.verifier_says(c)
     return out
 
 
 # ------------------------------------------------------------------ the objects
 def harnesses():
-    rows = sorted(store.harnesses_list(), key=lambda h: (-(h.get("passes") or 0), h.get("harness") or ""))
+    rows = sorted(store.harnesses_list(), key=lambda h: (-(h.get("runs") or 0), h.get("harness") or ""))
     return {"harnesses": [{k: v for k, v in h.items() if k not in ("results", "recipe")} for h in rows]}
 
 
@@ -99,9 +100,11 @@ def runs(limit=200):
 
 def md_runs(o):
     rows = [(_link(x["run"], "runs", x["run"]), _link(x["harness"], "harnesses", x["harness"]) if x.get("harness") else "",
-             f"{x['task']['taskset']}/{x['task']['name']}" if x.get("task") else "prompt", x["outcome"], _tests(x.get("tests")),
+             f"{x['task']['taskset']}/{x['task']['name']}" if x.get("task") else "prompt", x["verifier_says"],
              (x.get("started") or "")[:16]) for x in o["runs"]]
-    return "# Runs\n\nThe newest runs, every harness.\n\n" + _table(["run", "harness", "task", "outcome", "tests", "started"], rows) + FOOTER
+    return ("# Runs\n\nThe newest runs, every harness. Rewards are as each task's verifier wrote them; what a reward "
+            "means differs by taskset, so nothing here is marked pass or fail.\n\n"
+            + _table(["run", "harness", "task", "verifier says", "started"], rows) + FOOTER)
 
 
 def runnable():
@@ -120,8 +123,10 @@ def _table(head, rows):
     return "\n".join(out) + "\n"
 
 
-def _tests(t):
-    return f"{t.get('passed')}/{t.get('total')}" if isinstance(t, dict) and t.get("total") else ""
+def _summary(t):
+    """pytest's own summary line for a run's tests, or the counts when it printed none."""
+    if not isinstance(t, dict): return ""
+    return t.get("summary") or (f"{t.get('passed')} of {t.get('total')} passed" if t.get("total") else "")
 
 
 def _link(label, *parts):
@@ -134,10 +139,10 @@ FOOTER = ("\n---\nHarness Report runs agent harnesses from their GitHub repos on
 
 def md_harnesses(o):
     rows = [(_link(h["harness"], "harnesses", h["harness"]), h.get("use_case") or (h.get("summary") or "")[:90],
-             h.get("runs"), h.get("passes"), f"{h.get('tasks_passed')}/{h.get('tasks_tried')}", (h.get("last_run") or "")[:10])
+             h.get("runs"), h.get("tasks_tried"), (h.get("last_run") or "")[:10])
             for h in o["harnesses"]]
-    return ("# Harnesses\n\nEvery agent harness that has been run here, most passes first.\n\n"
-            + _table(["harness", "what it is", "runs", "passes", "tasks passed/tried", "last run"], rows) + FOOTER)
+    return ("# Harnesses\n\nEvery agent harness that has been run here, most runs first.\n\n"
+            + _table(["harness", "what it is", "runs", "tasks tried", "last run"], rows) + FOOTER)
 
 
 def md_harness(o):
@@ -145,22 +150,23 @@ def md_harness(o):
     lines = [f"# {h['harness']}", ""]
     if p.get("use_case"): lines += [f"> {p['use_case']}", ""]
     lines += [f"- repo: {h.get('repo')}", f"- commit: {h.get('commit')}", f"- api style: {h.get('api_style')}",
-              f"- runs: {h.get('runs')} ({h.get('passes')} passed)", f"- tasks passed/tried: {h.get('tasks_passed')}/{h.get('tasks_tried')}",
+              f"- runs: {h.get('runs')} ({h.get('scored')} with a reward)", f"- tasks tried: {h.get('tasks_tried')}",
               f"- models: {', '.join(h.get('models') or [])}"]
     if p:
         lines += [f"- domains: {', '.join(p.get('domains') or [])}", f"- languages: {', '.join(p.get('languages') or [])}",
                   f"- capabilities: {', '.join(p.get('capabilities') or [])}"]
     if h.get("summary"): lines += ["", "## How it runs here", "", h["summary"]]
     res = h.get("results") or {}
-    lines += ["", "## Results by task", "", _table(["task", "runs", "passes", "last"], [
-        (_link(k, "tasks", *k.split("/", 1)), v.get("runs"), v.get("passes"), v.get("last_outcome")) for k, v in sorted(res.items())])]
+    lines += ["", "## Results by task", "", _table(["task", "runs", "last reward", "best reward", "last tests"], [
+        (_link(k, "tasks", *k.split("/", 1)), v.get("runs"), v.get("last_reward"), v.get("best_reward"), _summary(v.get("last_tests")))
+        for k, v in sorted(res.items())])]
     if r.get("recs"):
         lines += ["## Tests to run next", "", f"_ranked by {r.get('source')}_", "",
                   _table(["task", "why"], [(_link(f"{x['taskset']}/{x['task']}", "tasks", x["taskset"], x["task"]), x.get("why"))
                                            for x in r["recs"]])]
-    lines += ["## Runs", "", _table(["run", "task", "outcome", "tests", "calls", "seconds"], [
+    lines += ["## Runs", "", _table(["run", "task", "verifier says", "calls", "seconds"], [
         (_link(x["run"], "runs", x["run"]), f"{(x.get('task') or {}).get('taskset')}/{(x.get('task') or {}).get('name')}" if x.get("task") else "prompt",
-         x["outcome"], _tests(x.get("tests")), x.get("calls"), x.get("seconds")) for x in o["runs"]])]
+         x["verifier_says"], x.get("calls"), x.get("seconds")) for x in o["runs"]])]
     return "\n".join(lines) + FOOTER
 
 
@@ -194,8 +200,9 @@ def md_task(o):
              f"- agent timeout: {t.get('agent_timeout')}s"]
     if t.get("oracle"): lines.append(f"- reference solution: reward {t['oracle'].get('reward')} on {t['oracle'].get('platform')}")
     res = t.get("results") or {}
-    lines += ["", "## Results by harness", "", _table(["harness", "runs", "passes", "last"], [
-        (_link(k, "harnesses", k), v.get("runs"), v.get("passes"), v.get("last_outcome")) for k, v in sorted(res.items())])]
+    lines += ["", "## Results by harness", "", _table(["harness", "runs", "last reward", "best reward", "last tests"], [
+        (_link(k, "harnesses", k), v.get("runs"), v.get("last_reward"), v.get("best_reward"), _summary(v.get("last_tests")))
+        for k, v in sorted(res.items())])]
     lines += ["## Instruction", "", "```", (t.get("instruction") or "").strip(), "```"]
     if t.get("instruction_truncated"): lines.append("_instruction cut at 16k characters_")
     return "\n".join(lines) + FOOTER
@@ -206,8 +213,7 @@ def md_run(o):
     lines = [f"# Run {c['run']}", "",
              f"- harness: {_link(h.get('name'), 'harnesses', h.get('name'))} @ {(h.get('commit') or '')[:12]}",
              f"- task: {_link(t.get('taskset') + '/' + t.get('name'), 'tasks', t['taskset'], t['name']) if t.get('name') else 'ad-hoc prompt'}",
-             f"- model: {c.get('model')}", f"- outcome: {store._outcome(c)} (reward {c.get('reward')})",
-             f"- tests: {_tests(c.get('tests'))}", f"- model calls: {c.get('calls')}  tokens in/out: {c.get('input_tokens')}/{c.get('output_tokens')}",
+             f"- model: {c.get('model')}", f"- verifier says: {store.verifier_says(c)}", f"- model calls: {c.get('calls')}  tokens in/out: {c.get('input_tokens')}/{c.get('output_tokens')}",
              f"- agent seconds: {c.get('seconds')}", f"- started: {c.get('started')}",
              f"- full bundle (calls, logs, files): {BASE}/api/run/{quote(c['run'])}"]
     failed = (c.get("tests") or {}).get("failed_names") or []
@@ -228,7 +234,7 @@ def resolve(parts, q=None):
         if not o: return None
         h = o["harness"]
         return (o, md_harness(o), f"{h['harness']} — harness",
-                f"{h['harness']}: {h.get('passes')} of {h.get('finished')} runs passed across {h.get('tasks_tried')} tasks. "
+                f"{h['harness']}: {h.get('runs')} runs across {h.get('tasks_tried')} tasks. "
                 + ((o.get("profile") or {}).get("use_case") or ""))
     if parts == ["tasks"]:
         o = tasksets(one("domain")); n = sum(t.get("n_tasks") or 0 for t in o["tasksets"])
@@ -251,7 +257,7 @@ def resolve(parts, q=None):
         if not o: return None
         c = o["run"]
         return (o, md_run(o), f"Run {c['run']}",
-                f"{(c.get('harness') or {}).get('name')} on {(c.get('task') or {}).get('name') or 'a prompt'}: {store._outcome(c)}.")
+                f"{(c.get('harness') or {}).get('name')} on {(c.get('task') or {}).get('name') or 'a prompt'}: {store.verifier_says(c)}.")
     return None
 
 
@@ -299,7 +305,7 @@ def llms(full=False):
              f"- To evaluate your own harness: sign in at {BASE}/connect, pick the repo, run a task; the site then recommends the next tests for what your harness is for.",
              "", "## Harnesses", ""]
     for h in hs if full else hs[:25]:
-        lines.append(f"- [{h['harness']}]({url('harnesses', h['harness'], ext='.md')}): {h.get('passes')}/{h.get('finished')} runs passed"
+        lines.append(f"- [{h['harness']}]({url('harnesses', h['harness'], ext='.md')}): {h.get('runs')} runs, {h.get('tasks_tried')} tasks"
                      + (f" — {h['use_case']}" if h.get("use_case") else ""))
     lines += ["", "## Runnable tasks", ""]
     for t in rn:

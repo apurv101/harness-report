@@ -1,20 +1,30 @@
-import { Pill, type Tone } from '../ui/Pill'
+import { Pill } from '../ui/Pill'
+import { VerifierSays } from '../runs/RunStatus'
 import type { Outcomes, RunRow } from '../../lib/types'
 
-const TONE: Record<string, [string, Tone]> = {
-  pass: ['Passed', 'ok'], fail: ['Failed', 'bad'], error: ['Error', 'bad'], running: ['Running', 'warn'],
+/**
+ * One run's result as its verifier reported it: the reward as written (neutral — what it means is the task's
+ * business) and what the tests said.  Only the states that are not about scoring get a tone.
+ */
+export function OutcomePill({ run }: { run: Pick<RunRow, 'outcome' | 'reward' | 'tests' | 'verifier_rc'> }) {
+  if (run.outcome === 'running') return <Pill tone="warn">Running</Pill>
+  if (run.outcome === 'error') return <Pill tone="warn">No reward</Pill>
+  return <VerifierSays run={{ kind: 'harbor', finished: 'yes', reward: run.reward, tests: run.tests, verifier_rc: run.verifier_rc }} />
 }
 
-/** One run's verdict, in the same words the runs list uses. */
-export function OutcomePill({ outcome }: { outcome?: RunRow['outcome'] | null }) {
-  const [text, tone] = TONE[outcome || ''] || ['—', 'plain']
-  return <Pill tone={tone}>{text}</Pill>
-}
-
-/** Several runs of one harness on one task, folded: "2/3 passed", toned by the latest. */
+/** Several runs of one harness on one task, folded: the latest reward and the best, and what the last tests said. */
 export function OutcomesCell({ o }: { o: Outcomes }) {
-  const tone: Tone = o.passes ? 'ok' : o.last_outcome === 'running' ? 'warn' : 'bad'
-  return <Pill tone={tone} title={`last: ${o.last_outcome}`}>{o.passes}/{o.runs} passed</Pill>
+  if (o.last_outcome === 'running') return <Pill tone="warn">Running</Pill>
+  const tests = o.last_tests
+  return (
+    <>
+      {o.last_reward == null ? <Pill tone="warn">no reward</Pill> : <Pill title="the latest run's reward, as its verifier wrote it">reward {o.last_reward}</Pill>}
+      {o.runs > 1 && o.best_reward != null && String(o.best_reward) !== String(o.last_reward) &&
+        <span className="muted small"> best {o.best_reward}</span>}
+      {tests?.summary && <span className="muted small"> · {tests.summary}</span>}
+      <span className="muted small"> · {o.runs} run{o.runs === 1 ? '' : 's'}</span>
+    </>
+  )
 }
 
 /** A page's machine-readable twins, for anyone (or anything) that would rather read Markdown or JSON. */

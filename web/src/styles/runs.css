@@ -73,6 +73,24 @@
 .runs-view .empty-card { padding: 40px 24px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); text-align: center; }
 .runs-view .empty-card p { color: var(--muted); }
 
+.runs-view .tests-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 20px 0 12px; }
+.runs-view .tests-toolbar label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.runs-view .tests-toolbar label:first-child { flex: 1; min-width: min(240px, 100%); }
+.runs-view .tests-toolbar input, .runs-view .tests-toolbar select { min-height: 36px; padding: 7px 10px; width: 100%; }
+.runs-view .tests-alert { padding: 12px; border-left: 3px solid var(--bad); background: var(--panel); overflow-wrap: anywhere; }
+.runs-view .test-case { border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; overflow: hidden; }
+.runs-view .test-case-toggle { display: flex; align-items: start; gap: 12px; width: 100%; padding: 15px; text-align: left; border: 0; background: var(--card); color: var(--ink); cursor: pointer; font: inherit; }
+.runs-view .test-case-toggle:hover { background: var(--panel); }
+.runs-view .test-case-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.runs-view .test-chevron { width: 12px; flex-shrink: 0; color: var(--muted); }
+.runs-view .test-case-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.runs-view .test-case-name strong { display: block; font: 12px/1.6 var(--mono); }
+.runs-view .test-case-name > span { display: block; color: var(--muted); font-size: 11px; margin-top: 5px; }
+.runs-view .test-case-body { padding: 0 15px 15px; border-top: 1px solid var(--line); }
+.runs-view .test-case-body h3 { font-size: 12px; margin: 15px 0 10px; }
+.runs-view .test-case-body details { margin-top: 15px; }
+.runs-view .test-case-body summary { margin-bottom: 8px; }
+
 @media (max-width: 640px) { .runs-view { padding-top: 28px; } .runs-view .msg { grid-template-columns: 1fr; gap: 4px; } .runs-view .run-list-head { align-items: flex-start; } .runs-view .run-list-head .ui-btn { font-size: 11px; padding: 9px 11px; } .runs-view h1 { font-size: 26px; } }
 
 /* ---------------------------------------------------------------- the run timeline

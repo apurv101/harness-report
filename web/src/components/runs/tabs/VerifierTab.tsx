@@ -24,16 +24,15 @@ export function VerifierTab({ bundle }: { bundle: RunBundle }) {
 
       {tests?.aborted && (
         <p className="small muted">
-          pytest stopped before running any test: <span className="mono">{tests.aborted}</span>. Usually a file the
-          agent left in the workdir that fails at import; the task's own tests never ran, so the reward says nothing
-          about the solution.
+          Test execution stopped: <span className="mono">{tests.aborted}</span>.
+          {tests.total ? ' Results below include the tests that were reported before it stopped.' : ' No individual test results were recorded.'}
         </p>
       )}
 
       {!!tests?.total && (
         <p className="small muted">
           The task's own test suite, run by <code>tests/test.sh</code> in the sandbox after the agent finished.
-          Reward is 1 only when every test passes.
+          The reward is whatever this task's verifier wrote; what it means depends on the task, so read it next to these results.
           {tests.summary && <> pytest: <span className="mono">{tests.summary}</span></>}
           {!!tests.agent_written && ` pytest also collected ${tests.agent_written} test${tests.agent_written === 1 ? '' : 's'} from files the agent wrote itself; they are not counted here.`}
         </p>
@@ -41,8 +40,8 @@ export function VerifierTab({ bundle }: { bundle: RunBundle }) {
 
       {!!tests?.cases?.length && <TestCases cases={tests.cases} />}
 
-      <LogBlock title="verifier/stdout.log" text={verifier['stdout.log']} />
-      <LogBlock title="verifier/stderr.log" text={verifier['stderr.log']} />
+      <LogBlock title="verifier/stdout.log" text={verifier['stdout.log']} run={bundle.run} cut={bundle.truncated.includes('verifier/stdout.log')} />
+      <LogBlock title="verifier/stderr.log" text={verifier['stderr.log']} run={bundle.run} cut={bundle.truncated.includes('verifier/stderr.log')} />
     </>
   )
 }

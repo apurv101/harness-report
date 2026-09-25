@@ -22,6 +22,15 @@ export interface Call {
   request?: CallRequest
   response?: CallResponse
   error?: string
+  /** set when the API cut this call's big fields to fit a response (serve.py fit_bundle); calls.jsonl has them */
+  request_trimmed?: Trimmed
+  response_trimmed?: Trimmed
+}
+
+export interface Trimmed {
+  fields: string[]
+  bytes: number
+  messages?: number | null
 }
 
 export interface CallRequest {
@@ -95,6 +104,7 @@ export interface Tests {
 }
 
 export interface TestCase {
+  id?: string
   name: string
   file: string
   result: string
@@ -186,6 +196,8 @@ export interface RunBundle {
   source: 'files' | 'table'
   /** names whose stored text lost bytes to the item limit — open the raw file for the whole thing */
   truncated: string[]
+  /** calls whose big request/response fields were cut to fit the response; 0 or absent when none */
+  calls_trimmed?: number
 }
 
 /** GET /api/run/<run-id>/files — the cheap poll while a run is still writing. */
@@ -306,11 +318,14 @@ export interface EvalState {
 /** How one harness did on one task, or one task by one harness: runs folded, newest last. */
 export interface Outcomes {
   runs: number
-  passes: number
+  /** runs whose verifier wrote a reward */
+  scored: number
   last?: string | null
   last_run?: string | null
-  last_outcome?: 'pass' | 'fail' | 'error' | 'running'
+  last_outcome?: Outcome
   last_reward?: number | string | null
+  /** the highest reward on this task; only ever compared within one task */
+  best_reward?: number | string | null
   last_tests?: Tests | null
 }
 
@@ -333,9 +348,8 @@ export interface HarnessCard {
   summary?: string | null
   runs: number
   finished: number
-  passes: number
+  scored: number
   tasks_tried: number
-  tasks_passed: number
   tasksets?: string[]
   results?: Record<string, Outcomes>
   models?: string[]
@@ -372,8 +386,14 @@ export interface RunRow {
   tests?: Tests | null
   calls?: number | null
   seconds?: number | null
-  outcome: 'pass' | 'fail' | 'error' | 'running'
+  verifier_rc?: number | null
+  outcome: Outcome
+  /** lib/store.py verifier_says: the reward as written, pytest's summary, a non-zero verifier exit */
+  verifier_says?: string
 }
+
+/** Not pass/fail: a reward means what its task's verifier says it means, so a finished run is only `scored`. */
+export type Outcome = 'scored' | 'error' | 'running'
 
 export interface HarnessPageData {
   harness: HarnessCard

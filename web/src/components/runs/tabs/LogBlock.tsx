@@ -17,7 +17,8 @@ export function LogBlock({ title, text, run, cut = false }: {
       <h2>
         {title} <span className="muted" style={{ textTransform: 'none', letterSpacing: 0 }}>
           {text == null ? '(missing)' : kb(byteSize(text))}
-          {cut && run && <> · head and tail only · <a href={rawFileURL(run, title)} target="_blank" rel="noopener">whole file</a></>}
+          {cut && <> · preview only</>}
+          {run && text != null && <> · <a href={rawFileURL(run, title)} target="_blank" rel="noopener">Open log file</a></>}
         </span>
       </h2>
       {text ? <pre>{text}</pre> : <div className="muted small">empty</div>}
