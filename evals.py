@@ -10,10 +10,15 @@ evals/<id>/:
 The run itself lands in runs/<id>-<task>/ like any other run, so the Runs page lists it the moment it starts, and
 the proxy's calls.jsonl there is read as it grows for the live call count.  This is the same contract the AWS
 control plane will serve (RUN-PLANE.md): POST to start, GET with an event cursor to follow.
+
+Every status change is also published to the run store (lib/store.py) as EVAL#<id> — the evaluation, its stage
+events and its console log, beside the runs it produced.  Best-effort: these three files are the record.
 """
-import json, os, re, signal, subprocess, threading, time
+import json, os, re, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "lib"))
+import ddb, store                                  # the DynamoDB copy: the evaluation, its events, its console log
 EVALS = os.path.join(HERE, "evals")
 RUNS = os.path.join(HERE, "runs")           # run.sh always writes here
 TASKSET, TASK = "aider_polyglot", "polyglot_python_bowling"
@@ -42,6 +47,15 @@ def _save(ev):
     tmp = _path(ev["id"], "eval.json.tmp")
     with open(tmp, "w") as f: json.dump(ev, f, indent=2)
     os.replace(tmp, _path(ev["id"], "eval.json"))
+    _publish(ev["id"])
+
+
+def _publish(eid):
+    """The evaluation into the run store, beside the runs it produced — its status, its stage events and the
+    console log run.sh wrote.  Never fatal: eval.json on disk is the record, the table is the copy."""
+    if not (os.environ.get("HR_DDB") or os.environ.get("HR_DDB_ENDPOINT") or os.environ.get("HR_TABLE")): return
+    try: store.publish_eval(eid)
+    except (ddb.Error, OSError, ValueError) as e: print(f"evals: not published: {e}", flush=True)
 
 
 def _alive(ev):
@@ -154,26 +168,6 @@ def events(eid, after=0):
     return evs[after:], len(evs)
 
 
-def _action(call):
-    """The last tool call in a recorded response, as one short line: `bash: pytest -q`."""
-    resp = call.get("response") or {}
-    uses = []
-    for ch in resp.get("choices") or []:
-        for tc in (ch.get("message") or {}).get("tool_calls") or []:
-            fn = tc.get("function") or {}
-            try: args = json.loads(fn.get("arguments") or "{}")
-            except ValueError: args = fn.get("arguments")
-            uses.append((fn.get("name"), args))
-    for b in resp.get("content") or []:
-        if isinstance(b, dict) and b.get("type") == "tool_use": uses.append((b.get("name"), b.get("input")))
-    if not uses: return None
-    name, args = uses[-1]
-    if isinstance(args, dict):
-        args = next((args[k] for k in ("command", "cmd", "path", "file_path", "query") if isinstance(args.get(k), str)), json.dumps(args))
-    one = " ".join(str(args or "").split())
-    return f"{name}: {one[:120]}" + ("…" if len(one) > 120 else "")
-
-
 def live(ev):
     """Model calls so far in the evaluation's run, read incrementally from the proxy's calls.jsonl."""
     st = LIVE.setdefault(ev["id"], {"offset": 0, "calls": 0, "input_tokens": 0, "output_tokens": 0, "errors": 0, "last_action": None})
@@ -188,6 +182,6 @@ def live(ev):
         u = c.get("usage") or {}
         st["calls"] += 1; st["input_tokens"] += u.get("input_tokens") or 0; st["output_tokens"] += u.get("output_tokens") or 0
         if c.get("error"): st["errors"] += 1
-        st["last_action"] = _action(c) or st["last_action"]
+        st["last_action"] = store.action(c) or st["last_action"]
     st["offset"] += end
     return {k: v for k, v in st.items() if k != "offset"}

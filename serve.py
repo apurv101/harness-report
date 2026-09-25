@@ -12,6 +12,8 @@ URLs
     /<run-id>                      legacy run link (opens the same frontend)
     /api/runs                      JSON list of runs (summary of each run.json)
     /api/run/<run-id>              JSON bundle: run.json, task, command, recipe, calls[], logs, files[]
+                                   both come from the DynamoDB table when one answers (lib/store.py, --store),
+                                   and from the run folders when it does not — the same JSON either way
     /raw/<run-id>/<file>           a file from the run folder as-is
     /auth/github                   start "Sign in with GitHub"; /auth/callback finishes it, /auth/logout ends it
     /api/me                        whether auth is on, and who is signed in
@@ -32,11 +34,12 @@ runs are public; only /api/github/* needs the session cookie.  See auth.py for t
 Every run is one folder runs/<run-id>/; its run.json says what harness (harness.name/repo/commit), what task
 (kind prompt|harbor, task.name/taskset, prompt) and what model it ran, plus rc/seconds/reward/calls once finished.
 """
-import argparse, json, os, re, sys
+import argparse, json, os, sys
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import unquote, parse_qs, urlsplit
 
-import auth, evals
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+import auth, ddb, evals, store, verifier
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.abspath(os.path.join(HERE, "web", "dist"))     # the built frontend
@@ -49,6 +52,19 @@ TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=u
 
 TEXT_FILES = ("task.txt", "command.sh", "stdout.log", "stderr.log", "proxy.log")   # inlined into the bundle
 CORE = TEXT_FILES + ("run.json", "recipe.json", "calls.jsonl")                     # everything else is "other"
+
+
+STORE = "auto"      # --store: auto (the table when it answers) | table | files
+
+
+def from_table(fn, *a):
+    """The table's answer, or None to fall through to the folders.  A stopped container or an expired credential
+    must degrade to reading runs/ rather than take the site down — and it says so once, on stderr."""
+    if STORE == "files" or (STORE == "auto" and not store.available()): return None
+    try: return fn(*a)
+    except ddb.Error as e:
+        sys.stderr.write(f"store: {e}\n")
+        return None
 
 
 def read(path, default=None):
@@ -75,82 +91,6 @@ def find_run(rid):
     return d if rid and "/" not in rid and rid not in (".", "..") and os.path.isdir(d) else None
 
 
-TEST_LINE = re.compile(r"^(\S+::\S+)\s+(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b", re.M)
-TEST_SUMMARY = re.compile(r"^=+ (.*?(?:passed|failed|error)[^=]*?) in [\d.]+s .*=+$", re.M)
-
-
-FAIL_HEAD = re.compile(r"^_{1,}\s+(\S+)\s+_{1,}$", re.M)
-
-
-def failure_details(out):
-    """pytest's FAILURES section split per test: {test_name: traceback text}."""
-    m = re.search(r"^=+ FAILURES =+$\n(.*?)(?=^=+ .* =+$)", out, re.M | re.S)
-    if not m: return {}
-    parts = FAIL_HEAD.split(m.group(1)); det = {}
-    for i in range(1, len(parts) - 1, 2): det[parts[i].split(".")[-1]] = parts[i + 1].strip()
-    return det
-
-
-def test_sources(tdir):
-    """{basename: {function name: source}} for every python test file in the task's tests folder."""
-    import ast
-    src = {}
-    for root, _, fs in os.walk(tdir):
-        for f in fs:
-            if not f.endswith(".py"): continue
-            code = read(os.path.join(root, f))
-            if code is None: continue
-            try: tree = ast.parse(code)
-            except SyntaxError: continue
-            lines = code.splitlines(); funcs = {}
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test"):
-                    start = min([node.lineno] + [x.lineno for x in node.decorator_list])
-                    funcs[node.name] = "\n".join(lines[start - 1:node.end_lineno])
-            src[f] = funcs
-    return src
-
-
-def tests(d, full=False):
-    """Per-test results parsed from verifier/stdout.log when the verifier ran pytest -v (the aider_polyglot tasks do):
-    passed/failed/total, the failed test names, and pytest's own summary line. None when there is no such output.
-    full=True adds `cases`: every test in pytest order with its result, its source from the task's tests folder,
-    and its failure traceback."""
-    out = read(os.path.join(d, "verifier", "stdout.log"))
-    if not out: return None
-    found = TEST_LINE.findall(out)
-    summ = TEST_SUMMARY.findall(out)
-    # pytest aborted before running anything (e.g. a file the agent left behind failed at import): report that, not 0 tests
-    aborted = re.search(r"^!+ Interrupted: (.*?) !+$", out, re.M)
-    if aborted:
-        bad = re.findall(r"^_+ ERROR collecting (\S+) _+$", out, re.M)
-        return {"passed": 0, "failed": 0, "total": 0, "failed_names": [], "agent_written": 0, "cases": [] if full else None,
-                "aborted": aborted.group(1) + (": " + ", ".join(bad) if bad else ""), "summary": summ[-1] if summ else None}
-    if not found and not summ: return None
-    by = {}
-    for name, res in found: by[name] = res          # a test reported twice keeps its last result
-    # Only the task's own test files count: pytest also collects any test files the agent left in the workdir.
-    # The task folder (run.json task.taskset_dir/task.name) says which files are official, when it is readable.
-    rj = load_json(os.path.join(d, "run.json")) or {}; t = rj.get("task") or {}
-    official = None; tdir = None
-    if t.get("taskset_dir") and t.get("name"):
-        tdir = os.path.join(t["taskset_dir"], t["name"], "tests")
-        if os.path.isdir(tdir): official = {f for _, _, fs in os.walk(tdir) for f in fs}
-        else: tdir = None
-    own = {n: r for n, r in by.items() if official is None or os.path.basename(n.split("::")[0]) in official}
-    extra = len(by) - len(own)
-    failed = sorted(n.split("::")[-1] for n, r in own.items() if r in ("FAILED", "ERROR"))
-    passed = sum(1 for r in own.values() if r in ("PASSED", "XPASS"))
-    res = {"passed": passed, "failed": len(failed), "total": len(own), "failed_names": failed, "agent_written": extra,
-           "summary": summ[-1] if summ else None}
-    if full:
-        det = failure_details(out); src = test_sources(tdir) if tdir else {}
-        res["cases"] = [{"name": n.split("::")[-1], "file": os.path.basename(n.split("::")[0]), "result": r,
-                         "own": n in own, "detail": det.get(n.split("::")[-1]),
-                         "source": src.get(os.path.basename(n.split("::")[0]), {}).get(n.split("::")[-1])} for n, r in by.items()]
-    return res
-
-
 def summary(rid):
     """The run's run.json as written by run.sh (origin half before the run, result half merged in after), plus
     `run` (the folder name), `has_run_json`, and `calls` counted from calls.jsonl when the run has not finished."""
@@ -159,7 +99,7 @@ def summary(rid):
     out = {"run": rid, "has_run_json": bool(rj), **rj}
     if out.get("calls") is None:
         out["calls"] = sum(1 for l in read(os.path.join(d, "calls.jsonl"), "").splitlines() if l.strip())
-    out["tests"] = tests(d)
+    out["tests"] = verifier.parse(d)
     return out
 
 
@@ -174,15 +114,17 @@ def bundle(d):
     for root, _, fs in os.walk(d):
         for f in sorted(fs):
             p = os.path.join(root, f); rel = os.path.relpath(p, d)
-            files.append({"name": rel, "bytes": os.path.getsize(p), "core": rel in CORE})
+            try: size = os.path.getsize(p)
+            except OSError: continue       # a harness can leave a dangling symlink behind (claude-config/debug/latest)
+            files.append({"name": rel, "bytes": size, "core": rel in CORE})
     files.sort(key=lambda x: x["name"])
-    verifier = {k: read(os.path.join(d, "verifier", k)) for k in ("stdout.log", "stderr.log", "reward.txt")} if os.path.isdir(os.path.join(d, "verifier")) else None
-    if verifier: verifier["tests"] = tests(d, full=True)
+    verified = {k: read(os.path.join(d, "verifier", k)) for k in ("stdout.log", "stderr.log", "reward.txt")} if os.path.isdir(os.path.join(d, "verifier")) else None
+    if verified: verified["tests"] = verifier.parse(d, full=True)
     return {"run": rid, "run_json": summary(rid),
             "recipe": load_json(os.path.join(d, "recipe.json")),
             "calls": calls, "calls_unparsed": bad,
             **{k.split(".")[0]: read(os.path.join(d, k)) for k in TEXT_FILES},
-            "verifier": verifier, "files": files}
+            "verifier": verified, "files": files}
 
 
 class H(SimpleHTTPRequestHandler):
@@ -304,8 +246,11 @@ class H(SimpleHTTPRequestHandler):
         if parts[:1] == ["api"]:
             if parts[1:] == ["me"]: return self.json(200, {"auth": auth.configured(), "user": auth.public(sess),
                                                             "install_url": "/auth/install" if auth.install_url() else "", "can_clone": auth.can_clone()})
-            if parts[1:] == ["runs"]: return self.json(200, [summary(r) for r in run_dirs()])
+            if parts[1:] == ["runs"]:
+                return self.json(200, from_table(store.runs_list) or [summary(r) for r in run_dirs()])
             if parts[1:2] == ["run"] and len(parts) == 3:
+                b = from_table(store.run_bundle, parts[2])
+                if b: return self.json(200, b)
                 d = find_run(parts[2])
                 return self.json(200, bundle(d)) if d else self.json(404, {"error": "no such run"})
             if parts[1:2] == ["github"]:
@@ -315,7 +260,11 @@ class H(SimpleHTTPRequestHandler):
             return self.json(404, {"error": "no such api route"})
         if parts[:1] == ["raw"] and len(parts) >= 3:
             d = find_run(parts[1]); p = os.path.realpath(os.path.join(d or "", *parts[2:]))
-            if not d or not p.startswith(os.path.realpath(d) + os.sep) or not os.path.isfile(p): return self.send(404, "not found", "text/plain")
+            if not d or not p.startswith(os.path.realpath(d) + os.sep) or not os.path.isfile(p):
+                # no folder on this machine (a run synced from elsewhere): the stored text of the file, if it is stored
+                text = from_table(store.file_text, parts[1], "/".join(parts[2:]))
+                if text is None: return self.send(404, "not found", "text/plain")
+                return self.send(200, text, "text/plain; charset=utf-8")
             ctype = "application/json" if p.endswith(".json") else "text/plain; charset=utf-8"
             return self.send(200, open(p, "rb").read(), ctype)
         # Anything the build wrote (hashed bundles, favicon, robots.txt) is served as-is.
@@ -332,9 +281,12 @@ class H(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("--port", type=int, default=8789); ap.add_argument("--runs", default=RUNS)
     ap.add_argument("--dist", default=DIST, help="the built frontend (default web/dist)")
-    a = ap.parse_args(); RUNS = os.path.abspath(a.runs); DIST = os.path.abspath(a.dist)
+    ap.add_argument("--store", choices=("auto", "table", "files"), default="auto",
+                    help="where the runs come from: auto (the DynamoDB table when it answers, else the folders)")
+    a = ap.parse_args(); RUNS = os.path.abspath(a.runs); DIST = os.path.abspath(a.dist); STORE = a.store
     if not os.path.isfile(os.path.join(DIST, "index.html")):
         print(f"warning: no index.html in {DIST} — run: npm --prefix web install && npm --prefix web run build", file=sys.stderr)
     mode = f"github sign-in as {auth.CLIENT_ID} ({auth.BASE_URL})" if auth.configured() else "open (no GITHUB_CLIENT_ID)"
-    print(f"Harness Report on http://localhost:{a.port}   runs={RUNS}   auth={mode}", flush=True)
+    src = "the run folders" if STORE == "files" else f"{ddb.target()}" + ("" if store.available() else " — NOT answering, reading the run folders")
+    print(f"Harness Report on http://localhost:{a.port}   runs={RUNS}   auth={mode}\n  runs from: {src}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", a.port), H).serve_forever()

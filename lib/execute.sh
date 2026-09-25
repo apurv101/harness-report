@@ -16,6 +16,8 @@ run_one() {
     "$(recipe_hash)" "$COMMIT" "$([ "$FORCE" = 1 ] && echo "${SEED_COMMIT:-none}" || echo reused)" "$([ -f "$WORK/recipe.diff" ] && echo 1 || echo 0)" \
     "$(git -C "$HERE" log -1 --format=%H -- proxy.py 2>/dev/null || true)" "$(git -C "$HERE" diff --quiet HEAD -- proxy.py 2>/dev/null && echo 0 || echo 1)" "$HERE/proxy.py"
   emit type run run "$RUN" task "$TASKNAME"
+  # the run's card, before anything runs: the site lists a run from the moment it exists, not from the moment it ends
+  store publish "$OUT" --card
   stage proxy "recording → ${OUT#$HERE/}/calls.jsonl"
   start_proxy "hr-proxy-$RUN" "$OUT"
   local ENV_ARGS=(); while IFS= read -r kv; do ENV_ARGS+=(-e "$kv"); done < <(python3 "$HERE/lib/recipe.py" env "$RECIPE" "$PROXY_URL")
@@ -46,4 +48,6 @@ run_one() {
   # run.json, result half: merged into the origin written above
   python3 "$HERE/lib/runjson.py" result "$OUT" "$RC" "$SECS" "$REWARD" "$VRC"
   emit type result run "$RUN" task "$TASKNAME" rc "$RC" reward "$REWARD" seconds "$SECS"
+  # and the whole run: the card again, every model call, the egress, the verifier's tests, the files
+  store publish "$OUT"
 }

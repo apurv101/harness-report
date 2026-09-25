@@ -10,6 +10,7 @@
 #   ./run.sh tasks aider_polyglot [--grep re]                  list the tasks in a taskset
 #   ./run.sh runs [--grep re]                                  list the runs (from each run.json)
 #   ./run.sh view runs/<run-id>                                print the recorded model calls as a conversation
+#   ./run.sh ddb start|stop|reset|status|sync|runs|run <id>     the run store: DynamoDB on the laptop (lib/ddb.sh)
 #
 #   --taskset S   a Harbor taskset: a directory of task folders, or a name under $HARBOR_TASKS/{datasets,hub-datasets,.}
 #   --tasks a,b   task folder names in the taskset      --grep re   regex on task names     --limit N   first N
@@ -53,9 +54,14 @@
 # Layout:   this file is the CLI and the stage spine; each stage is one file in lib/, sourced in the order the
 #           pipeline runs them — common.sh (events, errors, timing, image lookups), harbor.sh (tasksets and task
 #           images), report.sh (the tasks/runs/view subcommands), fetch.sh, recipe.sh (analyze + build),
-#           proxy.sh, execute.sh (one run). Everything they print for a person, and everything they write into a
-#           run folder, is Python beside them: report.py, recipe.py, runjson.py, task.py, events.py — plus the
-#           analyzer's standing prompt (analyze-prompt.md) and the schema it must answer with (recipe-schema.json).
+#           proxy.sh, execute.sh (one run), ddb.sh (the run store). Everything they print for a person, and
+#           everything they write into a run folder, is Python beside them: report.py, recipe.py, runjson.py,
+#           task.py, events.py, verifier.py — plus the analyzer's standing prompt (analyze-prompt.md) and the
+#           schema it must answer with (recipe-schema.json).
+#
+# The run store: with HR_DDB=local in .env (./run.sh ddb start), every run, recipe and evaluation is also published
+#           to a DynamoDB table as rows — lib/store.py holds the schema, `./run.sh ddb` drives it, and serve.py
+#           serves the site from it. Best-effort: the run folder is the record and a run never fails over the table.
 #
 # .env holds MODEL (a target, e.g. bedrock/<model-id>), AWS_PROFILE, AWS_REGION (needed when any target is Bedrock);
 # optional ROUTES, ANTHROPIC_API_KEY / OPENAI_API_KEY (+ ANTHROPIC_BASE_URL / OPENAI_BASE_URL) for the passthrough
@@ -65,6 +71,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/lib/common.sh"     # emit, die, help, stage, with_timeout, PRELUDE, the image lookups
 . "$HERE/lib/harbor.sh"     # tasksets, task.toml, task images, task selection
 . "$HERE/lib/report.sh"     # the tasks / runs / view subcommands, and the end-of-sweep table
+. "$HERE/lib/ddb.sh"        # the ddb subcommand: the laptop's DynamoDB, and the table every run is published to
 . "$HERE/lib/fetch.sh"      # 1. fetch
 . "$HERE/lib/recipe.sh"     # 3+4. analyze and build
 . "$HERE/lib/proxy.sh"      # 5. proxy
@@ -76,6 +83,7 @@ HARBOR_TASKS="${HARBOR_TASKS:-$HOME/Desktop/harbor-tasks}"
 # ------------------------------------------------------------------ the read-only subcommands
 case "${1:-}" in
   tasks) shift; cmd_tasks "$@"; exit 0 ;;
+  ddb)   shift; cmd_ddb   "$@"; exit 0 ;;
   runs)  shift; cmd_runs  "$@" ;;   # both exec python3, so neither returns
   view)  shift; cmd_view  "$@" ;;
 esac

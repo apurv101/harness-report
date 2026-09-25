@@ -107,7 +107,7 @@ prepare_recipe() {
   done
   [ "$OK" = 1 ] || die "could not build a working sandbox after 3 attempts; see work/$NAME/{build.log,check.log,analyze.stderr}"
   # the recipe built and passed its check: keep it for this commit, and say how it differs from the one before it
-  [ "$FORCE" = 1 ] && { cp "$RECIPE" "$STORED"; echo "recipe saved: recipes/$(basename "$STORED")"; }
+  [ "$FORCE" = 1 ] && { cp "$RECIPE" "$STORED"; echo "recipe saved: recipes/$(basename "$STORED")"; store recipe "$STORED"; }
   emit type built image "$IMAGE" platform "$PLATFORM"
   rm -f "$WORK/recipe.diff"
   if [ -n "$PREV" ]; then python3 "$HERE/lib/recipe.py" diff "$PREV" "$RECIPE" "$WORK/recipe.diff"; fi

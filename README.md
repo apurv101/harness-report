@@ -112,6 +112,59 @@ says what it was: `kind` (`prompt` or `harbor`), `harness` (`name`, `repo`, `com
 merged in at the end: `finished`, `rc`, `seconds`, `reward` (null for a prompt run), `verifier_rc`, `calls`,
 `input_tokens`, `output_tokens`, `errors`, `files`. `./run.sh runs` prints one line per folder from these.
 
+## The run store (DynamoDB)
+
+The run folder is the record; the table is that record as rows, so a screen can ask for the one piece it draws
+instead of the server walking 600 MB of folders on every request. One table, generic `pk`/`sk`, the same
+single-table shape the accounting harness uses — `lib/store.py` is the only place a key is built, and its
+docstring is the schema.
+
+```bash
+./run.sh ddb start          # DynamoDB Local in docker on :8001, and create the table
+./run.sh ddb sync           # every run folder, recipe and evaluation → rows (12 s for 68 runs, 4,000 rows)
+./run.sh ddb status         # what is in it
+./run.sh ddb run <run-id>   # read one back as JSON, exactly as /api/run/<run-id> serves it
+```
+
+| pk | sk | what |
+|---|---|---|
+| `RUNLIST` | `RUN#<run-id>` | the run card: all of `run.json`, the test tally, the last tool call |
+| `RUN#<run-id>` | `META` | the same card, for a read that already knows the run id |
+| `RUN#<run-id>` | `CALL#<0000000001>` | one model call, field for field as the proxy recorded it |
+| `RUN#<run-id>` | `EGRESS#<0000000001>` | one outbound connection the sandbox made |
+| `RUN#<run-id>` | `FILE#<path>` | one file in the folder: its size, and its text when it is text and small |
+| `RUN#<run-id>` | `MANIFEST`, `TESTS` | every file with its size; the per-test breakdown with sources and tracebacks |
+| `RECIPELIST`, `RECIPE#<name>@<commit>` | `RECIPE#…`, `META` | the recipe card, and the recipe itself |
+| `EVALLIST`, `EVAL#<eval-id>` | `EVAL#…`, `META`, `EVENT#<n>` | an evaluation started from the site, with its stage events and console log |
+
+Index `harness` answers "every run and every recipe of one harness" in one query
+(`./run.sh ddb harness aider-ai-aider`).
+
+Three rules, all of which the sibling repo learned the hard way. **No `UpdateItem`** — one writer owns a
+partition, so rows are re-put whole and a deployment needs only Query/GetItem/PutItem/BatchWriteItem.
+**The index row carries the whole card**, so the runs page renders from one Query. **Sequence sort keys are
+zero-padded**, and `META`/`MANIFEST`/`TESTS` sort outside those ranges, so `begins_with(sk, "CALL#")` can never
+sweep up the metadata.
+
+Big things stay files. A run folder can be 150 MB (one harness shipped a whole Node install into `/out`) and a
+DynamoDB item is capped at 400 KB, so a row holds every *fact* about the run plus the text of the files a person
+reads, inlined up to 200 KB; past that it keeps the head and the tail and says `truncated`, and the whole file is
+still at `/raw/<run-id>/<file>` — in S3 once runs land there ([RUN-PLANE.md](RUN-PLANE.md)). Two runs out of 68
+have a log cut this way, and two have more than 1,000 files.
+
+`run.sh` publishes the card before the agent starts and the whole run when the verifier is done, `recipe.sh`
+publishes a recipe when it saves one, and `evals.py` publishes an evaluation on every status change — all of them
+best-effort: if the table is not there the run folder is still written, and the run does not fail. `serve.py`
+serves `/api/runs` and `/api/run/<id>` from the table when one answers and from the folders when it does not, with
+byte-identical JSON either way (`--store table|files|auto`); its boot line names which. Nothing points at a table
+unless `HR_DDB`, `HR_DDB_ENDPOINT` or `HR_TABLE` is set, `.env` carries `HR_DDB=local`, and every command that
+touches it prints the table it used — the sibling repo spent two sessions believing its local switch was on while
+every write went to production.
+
+The table is a derived index: `./run.sh ddb reset && ./run.sh ddb start && ./run.sh ddb sync` rebuilds every row
+from the folders. `lib/ddb.py` speaks the DynamoDB wire protocol (SigV4 and all) in the standard library, so the
+same code reaches the laptop's container and a real table in a region with no boto3 anywhere.
+
 ## First run (2026-09-22)
 
 mini-swe-agent at 04d809c on Bedrock Sonnet 4.5, FizzBuzz: analyze 7 turns, $1.59, 122 s; build + check
