@@ -80,7 +80,7 @@ It is the direction that *usually* works, not the one that always works. What ac
 
 | failure mode | status |
 |---|---|
-| harness bin dir hidden by the task image's own `PATH` | **solved** — `HR_PATH` + `PRELUDE` carry and restore the image's PATH (`run.sh:220`) |
+| harness bin dir hidden by the task image's own `PATH` | **solved** — `HR_PATH` + `PRELUDE` carry and restore the image's PATH (`lib/common.sh`) |
 | harness needs a different python/node than the task's | **solved** — vendored under `/opt/harness`, system interpreter untouched |
 | base has no `apt-get` (alpine/musl/distroless) | **not a real risk here** — measured **0** of 49,170 tasks use one |
 | base's glibc older than what the harness's wheels/binaries need | **open** — the floor must be measured against the bake list before relying on it |
@@ -251,14 +251,14 @@ Measured across the 41 recipes generated so far:
 
 | rule | why | enforced by | measured |
 |---|---|---|---|
-| Dockerfile is an overlay: `ARG BASE=…` then `FROM ${BASE}` | the task owns the container | `recipe_ok` rejects the recipe outright (`run.sh:360`) | 41/41 |
+| Dockerfile is an overlay: `ARG BASE=…` then `FROM ${BASE}` | the task owns the container | `recipe_ok` rejects the recipe outright (`lib/recipe.sh`, `lib/recipe.py ok`) | 41/41 |
 | runtime vendored self-contained under `/opt/harness` | the task's own python/node must stay untouched or its tests break | analyzer prompt; `check_command` in the task image | 41/41 |
 | `apt-get` only what is genuinely missing | every apt package is a mutation of the task environment | analyzer prompt | **41/41 use apt-get** — nothing is pure `/opt/harness` |
-| PATH via `ENV` *and* `/etc/profile.d` | Debian's `/etc/profile` resets PATH for `bash -lc`, which would hide `/opt/harness/bin` | `HR_PATH` + `PRELUDE` (`run.sh:220`) | in the generated overlays |
+| PATH via `ENV` *and* `/etc/profile.d` | Debian's `/etc/profile` resets PATH for `bash -lc`, which would hide `/opt/harness/bin` | `HR_PATH` + `PRELUDE` (`lib/common.sh`) | in the generated overlays |
 | the harness source is never modified | the standing rule: a harness that cannot run is a finding | analyzer prompt | — |
 | no secrets baked, harness never run at build | the image is cached and shared across users | analyzer prompt | — |
 | no network at run time except the proxy | the whole measurement depends on it | `--internal` network, no route out | — |
-| `check_command` passes with `--network none` | proves the install without spending a model call | `check_image` (`run.sh:368`) | the gate for all three tiers |
+| `check_command` passes with `--network none` | proves the install without spending a model call | `check_image` (`lib/recipe.sh`) | the gate for all three tiers |
 
 The apt row is the important one. The packages are few and stable:
 
@@ -371,11 +371,11 @@ moved, with the cause: architecture, commit or proxy.
 
 ## Prerequisites in this repo
 
-1. **Per-run networks.** `run.sh:407-409` creates `hr-net` and `hr-int` once, globally. Concurrent runs on one
+1. **Per-run networks.** `build_proxy_image` in `lib/proxy.sh` creates `hr-net` and `hr-int` once, globally. Concurrent runs on one
    host share them, so harness A can reach proxy B. Must become `hr-net-$RUN` / `hr-int-$RUN`.
 2. **Proxy name length.** `hr-proxy-<run-id>-<task>` is a DNS label capped at 63 chars; run-ids get longer with
    a user prefix. Hash the suffix.
-3. **`~/.aws` mount.** `run.sh:431` mounts the operator's `~/.aws` into the proxy. On EC2 this becomes the
+3. **`~/.aws` mount.** `start_proxy` in `lib/proxy.sh` mounts the operator's `~/.aws` into the proxy. On EC2 this becomes the
    instance role (boto3 picks it up with no code change) — but the mount must become conditional.
 4. **Run folders.** `serve.py` reads `runs/` off local disk; it needs an S3-backed reader for the hosted copy.
 5. **BuildKit cache mounts** in the generated overlay Dockerfile, so the pip/npm/apt downloads survive the

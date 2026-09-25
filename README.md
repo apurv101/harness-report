@@ -17,8 +17,27 @@ tasks inside their own task images, runs each task's verifier, and records the r
 ./run.sh <url> --taskset aider_polyglot --tasks t --model bedrock/<id>   # override MODEL from .env for this invocation
 ```
 
-Files: `run.sh` (the pipeline), `proxy.py` (the recorder), `.env` (MODEL, AWS_PROFILE, AWS_REGION; optional
-ANALYZER_MODEL and HARBOR_TASKS, default `~/Desktop/harbor-tasks`).
+Files: `run.sh` (the CLI and the stage spine), `lib/` (the stages), `proxy.py` (the recorder), `.env` (MODEL,
+AWS_PROFILE, AWS_REGION; optional ANALYZER_MODEL and HARBOR_TASKS, default `~/Desktop/harbor-tasks`).
+
+`run.sh` holds the usage message, the arguments and the order the stages run in; each stage is one file in
+`lib/`, sourced in that order. Everything a stage prints for a person, and everything it writes into a run
+folder, is Python beside it — so the shell stays the plumbing and the formats stay readable.
+
+| | |
+|---|---|
+| `lib/common.sh` | `emit` (the `HR_EVENTS` stream), `die`, `help`, `stage`, `with_timeout`, `PRELUDE`, the image lookups |
+| `lib/harbor.sh` | where a taskset lives, what a `task.toml` says, which tasks a run selects, the task's own image |
+| `lib/report.sh` | the read-only subcommands: `tasks`, `runs`, `view`, and the end-of-sweep table |
+| `lib/fetch.sh` | stage 1 — the harness repo at its current HEAD, private repos included |
+| `lib/recipe.sh` | stages 3 and 4 — `analyze`, the per-commit recipe store, `build_overlay`, `check_image` |
+| `lib/proxy.sh` | stage 5 — the `hr-proxy` image, the two networks, one proxy container per run, the phase switch |
+| `lib/execute.sh` | stage 6 — `run_one`: the agent, then the verifier, then the run's result |
+| `lib/analyze-prompt.md`, `lib/recipe-schema.json` | what the analyzer is asked, and the shape it must answer with |
+| `lib/report.py` | the `runs` table, the `view` conversation, the task × k reward table |
+| `lib/recipe.py` | validate the analyzer's output, read fields, hash, env substitution, the diff against the previous recipe |
+| `lib/runjson.py` | `run.json` in three passes: origin, provenance, result |
+| `lib/task.py`, `lib/events.py` | a `task.toml` as one line; one `HR_EVENTS` event as one line |
 
 ## Stages
 

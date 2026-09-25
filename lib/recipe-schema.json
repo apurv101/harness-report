@@ -1,0 +1,11 @@
+{"type":"object","required":["summary","base_image","dockerfile","run_command","check_command","env","api_style"],"properties":{
+ "summary":{"type":"string","description":"one paragraph: what the harness is, its entrypoint, how it calls the model"},
+ "base_image":{"type":"string","description":"official image the overlay is built FROM when no task image is given (also the ARG BASE default), e.g. python:3.12-slim-bookworm"},
+ "dockerfile":{"type":"string","description":"complete OVERLAY Dockerfile: first line ARG BASE=<base_image>, second line FROM ${BASE}; build context is the repo root"},
+ "run_command":{"type":"string","description":"bash, run inside the container with cwd = the task working directory, runs ONE task from $TASK non-interactively and exits"},
+ "check_command":{"type":"string","description":"bash, verifies the install without calling a model (e.g. the CLI --help)"},
+ "env":{"type":"array","items":{"type":"object","required":["name","value"],"properties":{"name":{"type":"string"},"value":{"type":"string"}}},
+        "description":"environment for the run: routes the harness model calls to $PROXY_URL (literal placeholder), picks the model name, disables wizards/prompts"},
+ "api_style":{"type":"string","enum":["openai","anthropic"],"description":"which API the harness will speak to the proxy"},
+ "workdir":{"type":"string","description":"working directory for an ad-hoc task (default /work); Harbor tasks use their own image WORKDIR"},
+ "notes":{"type":"string"}}}
