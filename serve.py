@@ -7,8 +7,8 @@
 
 URLs
     /                              product landing
-    /#runs                        recorded evaluations
-    /#runs/<run-id>                run detail
+    /runs                          recorded evaluations
+    /runs/<run-id>                 run detail
     /<run-id>                      legacy run link (opens the same frontend)
     /api/runs                      JSON list of runs (summary of each run.json)
     /api/run/<run-id>              JSON bundle: run.json, task, command, recipe, calls[], logs, files[]
@@ -20,11 +20,22 @@ URLs
     /api/me                        whether auth is on, and who is signed in
     /api/github/installations      the app installations the signed-in user has
     /api/github/repos?installation=<id>   the repositories one installation grants
-    POST /api/evals {"repo": "owner/name"}  start run.sh on that repo × the bowling task (one at a time; 409 if busy)
+    POST /api/evals {"repo": "owner/name", "taskset"?, "task"?}  start run.sh on that repo × one runnable task —
+                                   the one named, else the harness's first recommendation, else bowling
+                                   (one at a time: 409 if busy; 400 for a task the site does not offer; 429 over the daily cap)
     /api/evals/current             the evaluation running now, or null
     /api/evals/<id>?after=<n>      follow one: its status, events from n on, live model calls, and the result when done
     /api/evals/<id>/console?after=<bytes>   run.sh's own terminal output from that byte on (&format=text for the whole log)
     POST /api/evals/<id>/cancel    stop it (run.sh removes its containers on the way out)
+
+Pages for people and agents (lib/pages.py) — each is the app's HTML with its own title, description and a
+<noscript> Markdown copy; add .md or .json to any of them for the Markdown or the object:
+    /harnesses  /harnesses/<name>  /tasks  /tasks/<taskset>  /tasks/<taskset>/<task>  /runs/<run-id>
+    /api/harnesses[/<name>]  /api/tasksets[/<taskset>?after=]  /api/tasks/<taskset>/<task>  /api/runnable
+    /api/harnesses/<name>/recs     the tests recommended next (lib/recommend.py), or null before the first run
+    /api/first-task?repo=o/n&language=&description=   the task a repo should start with
+    /llms.txt  /llms-full.txt  /sitemap.xml  /sitemaps/<name>.xml
+    POST /mcp                      MCP over streamable HTTP, read-only (lib/mcp.py)
 
 The frontend is the React app in web/; `npm --prefix web run build` writes web/dist, and everything under
 it is served as-is with index.html as the fallback for the app's own routes.  `npm --prefix web run dev`
@@ -38,10 +49,10 @@ Every run is one folder runs/<run-id>/; its run.json says what harness (harness.
 """
 import argparse, json, os, sys
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
-from urllib.parse import unquote, parse_qs, urlsplit
+from urllib.parse import quote, unquote, parse_qs, urlsplit
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-import auth, ddb, evals, leases, store, verifier
+import auth, ddb, evals, leases, mcp, pages, recommend, store, verifier
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.abspath(os.path.join(HERE, "web", "dist"))     # the built frontend
@@ -176,13 +187,13 @@ class H(SimpleHTTPRequestHandler):
                 # installation_id + setup_action and no state.  No token is minted here, so there
                 # is nothing to CSRF-protect; just drop the user back into the picker.
                 if (q.get("installation_id") or [""])[0]:
-                    return self.redirect("/#import", auth.clear_state())
+                    return self.redirect("/import", auth.clear_state())
                 return self.send(400, "no code in callback", "text/plain")
             if not auth.check_state(self.headers.get("Cookie"), (q.get("state") or [""])[0]):
                 return self.send(400, "bad oauth state; start again at /auth/github", "text/plain")
             try: user = auth.exchange(code)
             except RuntimeError as e: return self.send(502, f"github sign-in failed: {e}", "text/plain")
-            return self.redirect("/#import", auth.login(user), auth.clear_state())
+            return self.redirect("/import", auth.login(user), auth.clear_state())
         if parts == ["logout"]:
             return self.redirect("/", auth.logout(auth.session_id(self.headers.get("Cookie")) or ""))
         return self.json(404, {"error": "no such auth route"})
@@ -250,9 +261,19 @@ class H(SimpleHTTPRequestHandler):
         inst, private = self.installation_of(sess, repo)
         return auth.clone_token(inst)[0] if (inst and private) else None
 
+    def mcp_post(self):
+        """MCP over streamable HTTP.  Open to any origin on purpose — it is read-only, and agents are not browsers."""
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > 1_000_000: return self.json(413, {"error": "too large"})
+        code, out = mcp.handle_body(self.rfile.read(n))
+        if out is None:
+            self.send_response(202); self.send_header("Content-Length", "0"); self.end_headers(); return
+        return self.json(code, out)
+
     def do_POST(self):
         path = self.path.partition("?")[0]
         parts = [unquote(p) for p in path.strip("/").split("/") if p]
+        if parts == ["mcp"]: return self.mcp_post()
         if parts[:2] != ["api", "evals"]: return self.json(404, {"error": "no such api route"})
         if not evals.ENABLED: return self.json(503, {"error": "this server does not start runs"})
         # The site's own pages only: a cross-site form or fetch carries another Origin (and cannot send JSON without CORS)
@@ -272,8 +293,11 @@ class H(SimpleHTTPRequestHandler):
                 inst, private = self.installation_of(sess, repo)
                 token = None if evals.QUEUED else (auth.clone_token(inst)[0] if (inst and private) else None)
             except RuntimeError as e: return self.json(502, {"error": f"could not reach GitHub: {e}"})
+            taskset, task = (str(body.get(k) or "").strip() or None for k in ("taskset", "task"))
             try: ev = evals.start(repo, user=(auth.public(sess) or {}).get("login"), token=token,
-                                  installation=inst if private else None)
+                                  installation=inst if private else None, taskset=taskset, task=task)
+            except evals.Refused as r:
+                return self.json(429 if "limit" in str(r) else 400, {"error": str(r)})
             except evals.Busy as b: return self.json(409, {"error": f"{b.eval['repo']} is already running; one evaluation at a time", "eval": b.eval["id"]})
             except leases.Error as e: return self.json(503, {"error": f"the run queue is not reachable: {e}"})
             return self.json(201, self.eval_state(ev, 0))
@@ -281,6 +305,26 @@ class H(SimpleHTTPRequestHandler):
             ev = evals.cancel(parts[2])
             return self.json(200, {"eval": ev["id"], "cancelled": bool(ev.get("cancelled"))}) if ev else self.json(404, {"error": "no such evaluation"})
         return self.json(404, {"error": "no such api route"})
+
+    def entity(self, fn):
+        obj = from_table(fn)
+        return self.json(200, obj) if obj is not None else self.json(503, {"error": "the run store is not answering"})
+
+    def page_route(self, parts, q, fmt):
+        """One of the public pages, as the app's HTML (with this page's head and a Markdown copy), as Markdown, or
+        as the object both are rendered from.  A page the table does not know is the app's own 404 in HTML."""
+        found = from_table(pages.resolve, parts, q)
+        if fmt == "json":
+            return self.json(200, found[0]) if found else self.json(404, {"error": "not found"})
+        if fmt == "md":
+            return self.send(200, found[1], "text/markdown; charset=utf-8") if found else self.send(404, "not found\n", "text/markdown")
+        page = read(os.path.join(DIST, "index.html"))
+        if page is None: return self.send(500, "web/dist is missing: npm --prefix web run build", "text/plain")
+        if found:
+            path = "/" + "/".join(quote(p, safe="") for p in parts)
+            page = pages.noscript(pages.head(page, path, found[2], found[3], path), found[1])
+        missing = not found and parts != ["runs"] and STORE != "files" and store.available()
+        return self.send(404 if missing else 200, page, "text/html; charset=utf-8")
 
     def do_GET(self):
         path, _, query = self.path.partition("?")
@@ -310,7 +354,32 @@ class H(SimpleHTTPRequestHandler):
                 if not sess: return self.json(401, {"error": "sign in with github"})
                 return self.github_route(parts[2:], q, sess)
             if parts[1:2] == ["evals"]: return self.evals_get(parts[2:], q)
+            if parts[1:] == ["runnable"]: return self.entity(lambda: pages.runnable())
+            if parts[1:] == ["first-task"]:
+                one = lambda k: ((q.get(k) or [""])[0] or None)
+                repo = one("repo") or ""
+                if not evals.REPO_NAME.match(repo): return self.json(400, {"error": "repo=owner/name required"})
+                return self.json(200, from_table(recommend.first, repo, one("language"), one("description")))
+            if len(parts) == 4 and parts[1] == "harnesses" and parts[3] == "recs":
+                return self.json(200, from_table(store.harness_recs, parts[2]))
+            if parts[1:2] in (["harnesses"], ["tasksets"], ["tasks"]):
+                page = {"tasksets": "tasks"}.get(parts[1], parts[1])
+                if parts[1] == "tasks" and len(parts) != 4: return self.json(404, {"error": "use /api/tasks/<taskset>/<task>"})
+                return self.page_route([page, *parts[2:]], q, "json")
             return self.json(404, {"error": "no such api route"})
+        if parts == ["mcp"]: return self.json(405, {"error": "POST JSON-RPC messages here (MCP streamable HTTP)"})
+        if parts in (["llms.txt"], ["llms-full.txt"]):
+            text = from_table(pages.llms, parts == ["llms-full.txt"])
+            return self.send(200, text, "text/plain; charset=utf-8") if text else self.send(503, "the run store is not answering", "text/plain")
+        if parts == ["sitemap.xml"] or (len(parts) == 2 and parts[0] == "sitemaps" and parts[1].endswith(".xml")):
+            xml = from_table(pages.sitemap, None if parts == ["sitemap.xml"] else parts[1][:-4])
+            return self.send(200, xml, "application/xml") if xml else self.send(404, "no such sitemap", "text/plain")
+        last = parts[-1] if parts else ""
+        fmt = "md" if last.endswith(".md") else "json" if last.endswith(".json") else "html"
+        bare = [*parts[:-1], last.rsplit(".", 1)[0]] if fmt != "html" else parts
+        if bare and bare[0] in pages.PAGE_ROOTS and (len(bare) >= 2 or bare[0] != "runs" or fmt != "html"):
+            parts = bare
+            return self.page_route(parts, q, fmt)
         if parts[:1] == ["raw"] and len(parts) >= 3:
             d = find_run(parts[1]); p = os.path.realpath(os.path.join(d or "", *parts[2:]))
             if not d or not p.startswith(os.path.realpath(d) + os.sep) or not os.path.isfile(p):

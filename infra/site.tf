@@ -108,10 +108,12 @@ resource "aws_cloudfront_distribution" "site" {
     }
   }
 
-  # /api, /auth and /raw are serve.py.  Nothing here is cached: the runs list changes while a run is
-  # in flight, and /api/me is per-session.
+  # /api, /auth and /raw are serve.py.  So are the pages a crawler or an agent reads — each harness, taskset,
+  # task and run page gets its own <head> and a Markdown copy from serve.py (lib/pages.py), and every one of
+  # them has .md and .json twins — plus llms.txt, the sitemaps and the MCP endpoint, all built from the table.
+  # Nothing here is cached: the runs list changes while a run is in flight, and /api/me is per-session.
   dynamic "ordered_cache_behavior" {
-    for_each = ["/api/*", "/auth/*", "/raw/*"]
+    for_each = ["/api/*", "/auth/*", "/raw/*", "/mcp", "/harnesses*", "/tasks*", "/runs*", "/llms*.txt", "/sitemap*"]
 
     content {
       path_pattern             = ordered_cache_behavior.value

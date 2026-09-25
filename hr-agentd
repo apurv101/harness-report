@@ -154,6 +154,7 @@ def run(lease):
     try: store.publish_run(os.path.join(evals.RUNS, ev["run"]), replace=True)
     except (ddb.Error, OSError, ValueError) as e: log(f"could not publish the run: {e}")
     publish_full(eid)
+    if ev["status"] == "done": evals.after_run(ev)
     log(f"{eid}: {ev['status']} (rc={rc})")
     return True
 

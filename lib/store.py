@@ -19,9 +19,23 @@ single-table shape the accounting harness uses next door.
     EVALLIST                  EVAL#<eval-id>           an evaluation started from the site
     EVAL#<eval-id>            META                     eval.json, and run.sh's console output
     EVAL#<eval-id>            EVENT#<0000000001>       one stage event run.sh emitted for it
+    HARNESSLIST               HARNESS#<name>           the harness card: repo, latest recipe, runs, passes, per-task results
+    HARNESS#<name>            META                     the same card
+    HARNESS#<name>            PROFILE                  what the harness is for (lib/profile.py): use case, domains, languages
+    HARNESS#<name>            RECS                     the tests to run next, ranked (lib/recommend.py)
+    TASKSETLIST               TASKSET#<taskset>        the taskset card: size, domain, languages, catalog provenance
+    TASKSET#<taskset>         META                     the same card
+    TASKSET#<taskset>         TASK#<task>              the task card: task.toml, instruction.md (cut at 16k), runnable, oracle,
+                                                       and `results` — every harness's runs on it, folded in by refresh_task
+    RUNNABLE                  TASK#<taskset>/<task>    the same card, for the tasks the site may start (lib/tasks.py)
 
 Index `harness` (gsi1pk/gsi1sk) carries the cards a second time under `HARNESS#<name>`, sorted
 `RUN#<started>#<run-id>` and `RECIPE#<commit>` — every run and every recipe of one harness, in one query.
+Index `task` (gsi2pk/gsi2sk) carries each Harbor run card under `TASK#<taskset>/<task>`, sorted
+`RUN#<started>#<run-id>` — every harness's runs on one task, in one query.
+
+The task corpus is the one thing here that is not derived from a folder in this repo: `sync --tasks` reads it
+from $HARBOR_TASKS on the runner's disk, because the site has no disk to read it from.
 
 Three rules, all inherited from the sibling repo's store and all load-bearing:
 
@@ -41,7 +55,7 @@ folder (from S3, once runs land there: RUN-PLANE.md).  A row that had to be cut 
     lib/store.py publish <run-dir> [--card] the run (--card: only the card, before the agent starts)
     lib/store.py recipe <recipes/x@sha.json>
     lib/store.py eval <eval-id>             an evaluation the site started, with its events and console log
-    lib/store.py sync [--grep re] [--runs|--recipes|--evals] [--quiet]
+    lib/store.py sync [--grep re] [--runs|--recipes|--evals|--tasks|--harnesses] [--quiet]
     lib/store.py status                     what is in the table
     lib/store.py runs [--limit n] | run <run-id> | recipes | harness <name>
 
@@ -58,8 +72,9 @@ RUNS = os.path.join(ROOT, "runs")
 RECIPES = os.path.join(ROOT, "recipes")
 EVALS = os.path.join(ROOT, "evals")
 
-GSI = "harness"
+GSI, TASK_GSI = "harness", "task"
 RUNLIST, RECIPELIST, EVALLIST = "RUNLIST", "RECIPELIST", "EVALLIST"
+HARNESSLIST, TASKSETLIST, RUNNABLE = "HARNESSLIST", "TASKSETLIST", "RUNNABLE"
 
 # The same five files serve.py inlines into a run bundle, and the same definition of "core".
 TEXT_FILES = ("task.txt", "command.sh", "stdout.log", "stderr.log", "proxy.log")
@@ -82,6 +97,12 @@ def recipe_id(name, commit): return f"{name}@{commit}"
 def recipe_pk(rid): return f"RECIPE#{rid}"
 def eval_pk(eid): return f"EVAL#{eid}"
 def harness_pk(name): return f"HARNESS#{name}"
+def taskset_pk(ts): return f"TASKSET#{ts}"
+def harness_name(repo):
+    """The harness name run.sh derives from a GitHub owner/repo (run.sh: NAME=...), so a harness's cards can be
+    found from its repo before it has ever been run."""
+    return re.sub(r"[^a-z0-9.\-]", "-", repo.replace("/", "-").lower())
+def task_key(ts, task): return f"TASK#{ts}/{task}"
 
 
 # ------------------------------------------------------------------ reading a run folder
@@ -181,7 +202,10 @@ def items_of_run(d, card_only=False):
     harness = (card.get("harness") or {}).get("name") or "unknown"
     # pk/sk go on AFTER the card is spread in: a card read back out of the table carries its own keys, and both
     # writes would otherwise land on the same row, leaving the list silently stale.
-    items = [{**card, "pk": RUNLIST, "sk": f"RUN#{rid}",
+    t = card.get("task") or {}
+    by_task = {"gsi2pk": task_key(t["taskset"], t["name"]), "gsi2sk": f"RUN#{card.get('started') or ''}#{rid}"} \
+        if card.get("kind") == "harbor" and t.get("taskset") and t.get("name") else {}
+    items = [{**card, "pk": RUNLIST, "sk": f"RUN#{rid}", **by_task,
               "gsi1pk": harness_pk(harness), "gsi1sk": f"RUN#{card.get('started') or ''}#{rid}"},
              {**card, "pk": run_pk(rid), "sk": "META"}]
     if card_only: return items
@@ -286,20 +310,34 @@ def items_of_eval(eid):
 
 
 # ------------------------------------------------------------------ writing
+def _gsi(name, pk, sk):
+    return {"IndexName": name, "Projection": {"ProjectionType": "ALL"},
+            "KeySchema": [{"AttributeName": pk, "KeyType": "HASH"}, {"AttributeName": sk, "KeyType": "RANGE"}]}
+
+
 def create_table(name=None):
+    """Create the table, or add whichever index an older table is missing (the `task` index came later)."""
+    import time
     t = ddb.table(name)
     status = ddb.exists(name)
-    if status: return f"{t} already exists ({status})"
+    if status:
+        have = ddb.indexes(name)
+        if TASK_GSI in have: return f"{t} already exists ({status}; indexes {', '.join(sorted(have))})"
+        ddb.call("UpdateTable", {"TableName": t,
+                                 "AttributeDefinitions": [{"AttributeName": a, "AttributeType": "S"} for a in ("gsi2pk", "gsi2sk")],
+                                 "GlobalSecondaryIndexUpdates": [{"Create": _gsi(TASK_GSI, "gsi2pk", "gsi2sk")}]})
+        for _ in range(300):
+            if ddb.indexes(name).get(TASK_GSI) == "ACTIVE": return f"{t}: added index {TASK_GSI}"
+            time.sleep(2)
+        return f"{t}: index {TASK_GSI} still building after 10 minutes"
     ddb.call("CreateTable", {
         "TableName": t, "BillingMode": "PAY_PER_REQUEST",
-        "AttributeDefinitions": [{"AttributeName": a, "AttributeType": "S"} for a in ("pk", "sk", "gsi1pk", "gsi1sk")],
+        "AttributeDefinitions": [{"AttributeName": a, "AttributeType": "S"}
+                                 for a in ("pk", "sk", "gsi1pk", "gsi1sk", "gsi2pk", "gsi2sk")],
         "KeySchema": [{"AttributeName": "pk", "KeyType": "HASH"}, {"AttributeName": "sk", "KeyType": "RANGE"}],
-        "GlobalSecondaryIndexes": [{
-            "IndexName": GSI, "Projection": {"ProjectionType": "ALL"},
-            "KeySchema": [{"AttributeName": "gsi1pk", "KeyType": "HASH"}, {"AttributeName": "gsi1sk", "KeyType": "RANGE"}]}]})
-    import time
+        "GlobalSecondaryIndexes": [_gsi(GSI, "gsi1pk", "gsi1sk"), _gsi(TASK_GSI, "gsi2pk", "gsi2sk")]})
     for _ in range(60):
-        if ddb.exists(name) == "ACTIVE": return f"created {t} (pk/sk + index {GSI})"
+        if ddb.exists(name) == "ACTIVE": return f"created {t} (pk/sk + indexes {GSI}, {TASK_GSI})"
         time.sleep(1)
     return f"created {t}, still not ACTIVE after 60s"
 
@@ -310,6 +348,12 @@ def publish_run(d, card_only=False, replace=False):
     if replace and not card_only: ddb.delete_partition(run_pk(rid))
     items = items_of_run(d, card_only)
     ddb.batch_put(items)
+    if not card_only:
+        # A finished run changes two other cards: its harness's tally and its task's results.
+        card = items[0]
+        publish_harness((card.get("harness") or {}).get("name"))
+        t = card.get("task") or {}
+        if card.get("kind") == "harbor" and t.get("taskset"): refresh_task(t["taskset"], t.get("name"))
     return rid, len(items)
 
 
@@ -332,6 +376,128 @@ def publish_eval(eid):
     return eid, len(items)
 
 
+# ------------------------------------------------------------------ harnesses and tasks, as rows
+def _outcome(card):
+    """One run, as the one word a results grid shows."""
+    if card.get("status") == "running" or not card.get("finished"): return "running"
+    r = card.get("reward")
+    if r is None: return "error"
+    return "pass" if r == 1 else "fail"
+
+
+def results_of(cards, key):
+    """Fold run cards into {key(card): {runs, passes, last, last_run, last_outcome, best}}, oldest to newest."""
+    out = {}
+    for c in sorted(cards, key=lambda c: (c.get("started") or "", c.get("run") or "")):
+        k = key(c)
+        if not k: continue
+        r = out.setdefault(k, {"runs": 0, "passes": 0})
+        o = _outcome(c)
+        r["runs"] += 1; r["passes"] += o == "pass"
+        r.update(last=c.get("started"), last_run=c.get("run"), last_outcome=o,
+                 last_reward=c.get("reward"), last_tests=c.get("tests"))
+    return out
+
+
+def harness_card(name):
+    """A harness, summed up from its runs and its recipes: what the harness page and llms.txt lead with."""
+    runs = harness_runs(name)
+    # The index holds each recipe twice (the list row and the META row that carries the Dockerfile); keep the list row.
+    recipes = [strip(i) for i in ddb.query(harness_pk(name), "RECIPE#", index=GSI) if i.get("pk") == RECIPELIST]
+    latest = max(runs, key=lambda c: c.get("started") or "", default={})
+    rec = next((r for r in recipes if r.get("commit") == (latest.get("harness") or {}).get("commit")), None) \
+        or (recipes[-1] if recipes else {})
+    h = latest.get("harness") or {}
+    task_results = results_of([c for c in runs if c.get("kind") == "harbor"],
+                              lambda c: f"{(c.get('task') or {}).get('taskset')}/{(c.get('task') or {}).get('name')}")
+    finished = [c for c in runs if _outcome(c) in ("pass", "fail", "error")]
+    profile = strip(ddb.get(harness_pk(name), "PROFILE")) or None
+    return {"harness": name, "repo": h.get("repo"), "commit": h.get("commit") or rec.get("commit"),
+            "api_style": h.get("api_style") or rec.get("api_style"), "summary": rec.get("summary"),
+            "recipe": rec.get("recipe"), "base_image": rec.get("base_image"), "recipes": len(recipes),
+            "runs": len(runs), "finished": len(finished), "passes": sum(1 for c in finished if _outcome(c) == "pass"),
+            "tasks_tried": len(task_results), "tasks_passed": sum(1 for r in task_results.values() if r["passes"]),
+            "tasksets": sorted({k.split("/")[0] for k in task_results}), "results": task_results,
+            "first_run": min((c.get("started") for c in runs if c.get("started")), default=None),
+            "last_run": latest.get("started"), "last_run_id": latest.get("run"),
+            "models": sorted({c.get("model") for c in runs if c.get("model")}),
+            "use_case": (profile or {}).get("use_case"), "domains": (profile or {}).get("domains")}
+
+
+def publish_harness(name):
+    if not name: return 0
+    card = harness_card(name)
+    if not card["runs"] and not card["recipes"]: return 0
+    return ddb.batch_put([{**card, "pk": HARNESSLIST, "sk": harness_pk(name)},
+                          fit({**card, "pk": harness_pk(name), "sk": "META"}, ())])
+
+
+def publish_profile(name, profile):
+    ddb.put({**profile, "harness": name, "pk": harness_pk(name), "sk": "PROFILE"})
+    publish_harness(name)
+
+
+def publish_recs(name, recs):
+    ddb.put({**recs, "harness": name, "pk": harness_pk(name), "sk": "RECS"})
+
+
+def task_items(ts_card, tasks, runnable_keys=None):
+    """The rows for one taskset: its card twice, a row per task, and a RUNNABLE row per task the site may start."""
+    ts = ts_card["taskset"]
+    items = [{**ts_card, "pk": TASKSETLIST, "sk": taskset_pk(ts)}, {**ts_card, "pk": taskset_pk(ts), "sk": "META"}]
+    for t in tasks:
+        row = fit({**t, "pk": taskset_pk(ts), "sk": f"TASK#{t['task']}"}, ("instruction",))
+        items.append(row)
+        if t.get("runnable"): items.append({**row, "pk": RUNNABLE, "sk": task_key(ts, t["task"])})
+    return items
+
+
+def publish_tasks(grep=None, quiet=False):
+    """The Harbor corpus into the table (lib/tasks.py builds the cards).  Task rows that already carry `results`
+    keep them — the corpus knows nothing about runs, the runs index does."""
+    import tasks as corpus
+    n = rows = 0
+    for ts_card, ts_tasks in corpus.corpus():
+        if grep and not re.search(grep, ts_card["taskset"]): continue
+        old = {r["sk"]: r.get("results") for r in ddb.query(taskset_pk(ts_card["taskset"]), "TASK#", attributes=["sk", "results"])}
+        for t in ts_tasks:
+            if old.get(f"TASK#{t['task']}"): t["results"] = old[f"TASK#{t['task']}"]
+        items = task_items(ts_card, ts_tasks)
+        ddb.batch_put(items); n += 1; rows += len(items)
+        if not quiet: print(f"  taskset {ts_card['taskset']:40s} {len(ts_tasks):6d} tasks  {ts_card['n_runnable']} runnable")
+    # A task that fell out of the runnable pool has to leave the RUNNABLE list too.
+    live = {r["sk"] for r in ddb.query(RUNNABLE, "TASK#", attributes=["pk", "sk"])}
+    keep = {task_key(t["taskset"], t["task"]) for t in runnable_list(fresh=True)}
+    stale = live - keep
+    if stale and not grep:
+        t_ = ddb.table()
+        for sk in sorted(stale):
+            ddb.call("DeleteItem", {"TableName": t_, "Key": {"pk": {"S": RUNNABLE}, "sk": {"S": sk}}})
+    return n, rows
+
+
+def runnable_list(fresh=False):
+    """The tasks the site may start.  `fresh` reads them from the corpus rows rather than the RUNNABLE list."""
+    if not fresh: return [strip(i) for i in ddb.query(RUNNABLE, "TASK#")]
+    import tasks as corpus
+    keys = corpus.runnable_set()
+    return [{"taskset": ts, "task": t} for ts, t in sorted(keys)]
+
+
+def refresh_task(ts, name):
+    """Fold every run on one task into its card's `results`, keyed by harness.  Runs publish this; the corpus
+    sync keeps it."""
+    if not ts or not name: return 0
+    row = ddb.get(taskset_pk(ts), f"TASK#{name}")
+    if not row: return 0
+    runs = task_runs(ts, name)
+    row["results"] = results_of(runs, lambda c: (c.get("harness") or {}).get("name"))
+    row["runs"] = len(runs)
+    items = [row]
+    if row.get("runnable"): items.append({**row, "pk": RUNNABLE, "sk": task_key(ts, name)})
+    return ddb.batch_put(items)
+
+
 # ------------------------------------------------------------------ reading, in the shapes the site already serves
 _ok = (None, 0.0)
 
@@ -349,8 +515,11 @@ def available(ttl=30):
     return was
 
 
+KEYS = ("pk", "sk", "gsi1pk", "gsi1sk", "gsi2pk", "gsi2sk")
+
+
 def strip(item):
-    return {k: v for k, v in (item or {}).items() if k not in ("pk", "sk", "gsi1pk", "gsi1sk")}
+    return {k: v for k, v in (item or {}).items() if k not in KEYS}
 
 
 def runs_list(limit=None):
@@ -443,6 +612,55 @@ def running_eval():
     return None
 
 
+# ------------------------------------------------------------------ harnesses and tasks, read back
+
+TASK_LIST_FIELDS = ["taskset", "task", "difficulty", "category", "language", "tags", "runnable", "compose", "results",
+                    "runs", "oracle", "agent_timeout"]
+
+
+def harnesses_list():
+    return [strip(i) for i in ddb.query(HARNESSLIST, "HARNESS#")]
+
+
+def harness(name):
+    return strip(ddb.get(harness_pk(name), "META")) or None
+
+
+def harness_profile(name):
+    return strip(ddb.get(harness_pk(name), "PROFILE")) or None
+
+
+def harness_recs(name):
+    return strip(ddb.get(harness_pk(name), "RECS")) or None
+
+
+def tasksets_list():
+    return [strip(i) for i in ddb.query(TASKSETLIST, "TASKSET#")]
+
+
+def taskset(ts):
+    return strip(ddb.get(taskset_pk(ts), "META")) or None
+
+
+def taskset_tasks(ts, after=None, limit=200):
+    """One page of a taskset's tasks, without their instructions, and the cursor for the next page (None at the end).
+    The largest taskset has 33,786 tasks, so a page is the only honest unit."""
+    rows = ddb.query(taskset_pk(ts), "TASK#", limit=limit + 1, attributes=["sk", *TASK_LIST_FIELDS],
+                     after=f"TASK#{after}" if after else None)
+    more = len(rows) > limit
+    rows = rows[:limit]
+    return [strip(r) for r in rows], (rows[-1]["task"] if more and rows else None)
+
+
+def task(ts, name):
+    return strip(ddb.get(taskset_pk(ts), f"TASK#{name}")) or None
+
+
+def task_runs(ts, name):
+    """Every harness's runs on one task, oldest first, out of the `task` index."""
+    return [strip(i) for i in ddb.query(task_key(ts, name), "RUN#", index=TASK_GSI)]
+
+
 def file_text(rid, name):
     """One stored file's text, for /raw/<run-id>/<file> when the folder is not on this machine."""
     row = ddb.get(run_pk(rid), f"FILE#{name}")
@@ -451,7 +669,10 @@ def file_text(rid, name):
 
 # ------------------------------------------------------------------ CLI
 def cmd_sync(a):
-    what = [w for w in ("runs", "recipes", "evals") if getattr(a, w)] or ["runs", "recipes", "evals"]
+    what = [w for w in ("runs", "recipes", "evals", "tasks", "harnesses") if getattr(a, w)] or ["runs", "recipes", "evals", "harnesses"]
+    if "tasks" in what:
+        k, rows = publish_tasks(a.grep, a.quiet)
+        n += k; items += rows
     n = items = 0
     if "runs" in what:
         for rid in sorted(os.listdir(RUNS) if os.path.isdir(RUNS) else []):
@@ -469,6 +690,18 @@ def cmd_sync(a):
             if not os.path.isdir(os.path.join(EVALS, eid)) or (a.grep and not re.search(a.grep, eid)): continue
             _, k = publish_eval(eid); n += 1; items += k
             if not a.quiet: print(f"  eval    {eid}  ({k} rows)")
+    if "harnesses" in what:
+        cards = ddb.query(RUNLIST, "RUN#", attributes=["harness", "task", "kind"])
+        # Each task a run has touched gets its results re-folded — a run published before its task card existed
+        # (or before the corpus was synced) would otherwise never show on the task's page.
+        for ts, name in sorted({((c.get("task") or {}).get("taskset"), (c.get("task") or {}).get("name"))
+                                for c in cards if c.get("kind") == "harbor"}):
+            if ts and name and (not a.grep or re.search(a.grep, ts)): refresh_task(ts, name)
+        names = {(c.get("harness") or {}).get("name") for c in cards}
+        names |= {c.get("harness") for c in ddb.query(RECIPELIST, "RECIPE#", attributes=["harness"])}
+        for name in sorted(x for x in names if x and (not a.grep or re.search(a.grep, x))):
+            k = publish_harness(name); n += 1; items += k
+            if not a.quiet: print(f"  harness {name}  ({k} rows)")
     print(f"{n} published, {items} rows → {ddb.target()}")
 
 
@@ -478,11 +711,16 @@ def cmd_status(a):
     runs = ddb.query(RUNLIST, "RUN#", attributes=["pk", "sk", "status", "reward"])
     recipes = ddb.query(RECIPELIST, "RECIPE#", attributes=["pk", "sk"])
     evals = ddb.query(EVALLIST, "EVAL#", attributes=["pk", "sk"])
-    print(f"{ddb.target()}   {status}")
+    harnesses = ddb.query(HARNESSLIST, "HARNESS#", attributes=["pk", "sk"])
+    tasksets = ddb.query(TASKSETLIST, "TASKSET#", attributes=["pk", "sk", "n_tasks"])
+    runnable = ddb.query(RUNNABLE, "TASK#", attributes=["pk", "sk"])
+    print(f"{ddb.target()}   {status}   indexes: {', '.join(sorted(ddb.indexes()))}")
     print(f"  runs     {len(runs)}   ({sum(1 for r in runs if r.get('status') == 'running')} running, "
           f"{sum(1 for r in runs if r.get('reward'))} rewarded)")
     print(f"  recipes  {len(recipes)}")
     print(f"  evals    {len(evals)}")
+    print(f"  harnesses {len(harnesses)}")
+    print(f"  tasksets {len(tasksets)}   ({sum(t.get('n_tasks') or 0 for t in tasksets)} tasks, {len(runnable)} runnable)")
 
 
 def main():
@@ -497,7 +735,7 @@ def main():
     p = sub.add_parser("eval"); p.add_argument("id")
     p = sub.add_parser("sync"); p.add_argument("--grep"); p.add_argument("--quiet", action="store_true")
     p.add_argument("--replace", action="store_true")
-    for w in ("runs", "recipes", "evals"): p.add_argument(f"--{w}", action="store_true")
+    for w in ("runs", "recipes", "evals", "tasks", "harnesses"): p.add_argument(f"--{w}", action="store_true")
     p = sub.add_parser("runs"); p.add_argument("--limit", type=int)
     p = sub.add_parser("run"); p.add_argument("id")
     sub.add_parser("recipes")

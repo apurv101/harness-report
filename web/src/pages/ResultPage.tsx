@@ -5,7 +5,8 @@ import { Icon } from '../components/ui/Icon'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useEvaluation } from '../hooks/useEvaluation'
 import { evalConsoleURL } from '../lib/api'
-import { BOWLING, progress } from '../lib/evaluation'
+import { NextTests } from '../components/entities/NextTests'
+import { inProgress, progress, taskTitle } from '../lib/evaluation'
 import { FIZZBUZZ_OUTPUT } from '../lib/preview'
 import { usePreview } from '../state/PreviewContext'
 
@@ -26,16 +27,17 @@ function LiveResult({ id }: { id: string }) {
   const { state, events, error } = useEvaluation(id)
   if (error && !state) return <FlowLayout step={4}><p className="flow-helper">Could not load the run: {error}</p></FlowLayout>
   if (!state) return <FlowLayout step={4}><p className="flow-helper">Loading the result…</p></FlowLayout>
-  if (state.eval.status === 'running') return <Navigate to="/check" replace />
+  if (inProgress(state.eval.status)) return <Navigate to="/check" replace />
 
   const ev = state.eval; const r = state.result; const t = r?.tests
+  const title = taskTitle(ev.task)
   const passed = ev.status === 'done' && r?.reward === 1
   const { details, error: stopped } = progress(events, state.live, state)
   const heading = ev.status === 'cancelled' ? 'Run cancelled.'
     : ev.status === 'failed' ? 'The run stopped before the tests.'
     : passed ? 'First task passed.' : 'First task finished.'
-  const sub = ev.status === 'done' && t?.total ? `${BOWLING.title} · ${t.passed} of ${t.total} tests passed`
-    : stopped ? `${BOWLING.title} · ${stopped}` : BOWLING.title
+  const sub = ev.status === 'done' && t?.total ? `${title} · ${t.passed} of ${t.total} tests passed`
+    : stopped ? `${title} · ${stopped}` : `${title} · ${ev.taskset}`
   const facts: [string, string][] = [
     ['TASK RESULT', ev.status !== 'done' ? '—' : passed ? 'Passed' : 'Failed'],
     ['TESTS', t?.total ? `${t.passed}/${t.total}` : '—'],
@@ -54,7 +56,7 @@ function LiveResult({ id }: { id: string }) {
       <SelectedRepo repo={ev.repo || repo!} />
       <div className="flow-card">
         <div className="result-banner">
-          <strong>{BOWLING.title}</strong>
+          <strong>{title}</strong>
           <span className="pass-label">{passed ? <><Icon name="check" /> Passed</> : ev.status === 'done' ? 'Not passed' : ev.status}</span>
         </div>
         <div className="result-details">
@@ -77,8 +79,13 @@ function LiveResult({ id }: { id: string }) {
         {r && <Link className="text-link" to={`/runs/${encodeURIComponent(ev.run)}`}>Open the full run</Link>}
         <a className="text-link" href={evalConsoleURL(id)} target="_blank" rel="noopener">Console log</a>
         <button onClick={() => { setEval(null); navigate('/check') }}>Run again</button>
+        {ev.harness && <Link to={`/harnesses/${encodeURIComponent(ev.harness)}`} className="text-link">Harness page</Link>}
         <Link to="/import" className="text-link">Choose another harness</Link>
       </div>
+      {ev.status === 'done' && (
+        <NextTests harness={ev.harness || ev.repo.replace('/', '-').toLowerCase()} repo={ev.repo} afterRun={ev.run}
+                   onStarted={id => { setEval(id); navigate('/check') }} />
+      )}
     </FlowLayout>
   )
 }

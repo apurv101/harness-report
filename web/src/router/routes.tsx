@@ -1,6 +1,8 @@
 import { Route, Routes } from 'react-router-dom'
 import { PageLayout } from '../components/layout/PageLayout'
 import { CheckPage } from '../pages/CheckPage'
+import { HarnessPage } from '../pages/HarnessPage'
+import { HarnessesPage } from '../pages/HarnessesPage'
 import { ImportPage } from '../pages/ImportPage'
 import { LandingPage } from '../pages/LandingPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
@@ -8,9 +10,12 @@ import { ResultPage } from '../pages/ResultPage'
 import { RunDetailPage } from '../pages/RunDetailPage'
 import { RunsPage } from '../pages/RunsPage'
 import { SignInPage } from '../pages/SignInPage'
+import { TaskPage } from '../pages/TaskPage'
+import { TasksetPage } from '../pages/TasksetPage'
+import { TasksPage } from '../pages/TasksPage'
 import { RedirectWhenSignedIn, RequireRepo, RequireResult, RequireSignedIn } from './guards'
 
-/** Landing, the three-step flow, and the recorded runs — one shell around all of them. */
+/** Landing, the three-step flow, the recorded runs, and a page per harness, taskset and task — one shell. */
 export function AppRoutes() {
   const signIn = <RedirectWhenSignedIn><SignInPage /></RedirectWhenSignedIn>
   return (
@@ -24,6 +29,11 @@ export function AppRoutes() {
         <Route path="/check/result" element={<RequireResult><ResultPage /></RequireResult>} />
         <Route path="/runs" element={<RunsPage />} />
         <Route path="/runs/:runId" element={<RunDetailPage />} />
+        <Route path="/harnesses" element={<HarnessesPage />} />
+        <Route path="/harnesses/:name" element={<HarnessPage />} />
+        <Route path="/tasks" element={<TasksPage />} />
+        <Route path="/tasks/:taskset" element={<TasksetPage />} />
+        <Route path="/tasks/:taskset/:task" element={<TaskPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

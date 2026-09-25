@@ -26,10 +26,14 @@ export function RunsTable({ runs }: { runs: RunSummary[] }) {
           {runs.map(run => (
             <tr className="row" key={run.run} onClick={e => open(e, run.run)}>
               <td>
-                <Link className="run-name" to={`/runs/${encodeURIComponent(run.run)}`}>{run.harness?.name || run.run}</Link>
+                {run.harness?.name
+                  ? <Link className="run-name" to={`/harnesses/${encodeURIComponent(run.harness.name)}`}>{run.harness.name}</Link>
+                  : <Link className="run-name" to={`/runs/${encodeURIComponent(run.run)}`}>{run.run}</Link>}
                 <span className="run-id" title={run.run}>{run.run}</span>
               </td>
-              <td className="run-task">{truncate(taskText(run), 100)}</td>
+              <td className="run-task">{run.kind === 'harbor' && run.task?.name
+                ? <Link to={`/tasks/${encodeURIComponent(run.task.taskset || '')}/${encodeURIComponent(run.task.name)}`}>{truncate(taskText(run), 100)}</Link>
+                : truncate(taskText(run), 100)}</td>
               <td><EvaluationStatus run={run} /></td>
               <td className="num">{fmt(run.calls)}</td>
               <td className="num">{fmt(run.input_tokens)} / {fmt(run.output_tokens)}</td>

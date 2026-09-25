@@ -1,18 +1,22 @@
 const TABS = ['traj', 'calls', 'verifier', 'logs', 'recipe', 'run', 'files']
+const ROUTES = ['connect', 'login', 'import', 'check', 'runs', 'harnesses', 'tasks']
 
 /**
- * Keep old links working.  Runs used to live at /<run-id> with the tab in the hash, and the
- * routes before this app were bare hashes (#runs/<id>); the router speaks #/… only.
+ * Keep old links working.  The app used hash routes (#/runs/<id>, and before that #runs/<id>), and before that
+ * runs lived at /<run-id> with the tab in the hash.  Every one of those becomes a real path, which is what a
+ * crawler, an agent reading the .md twin, and a shared link all need.
  */
 export function normalizeLocation(): void {
-  if (!['/', '/index.html'].includes(location.pathname)) {
-    const path = location.pathname.replace(/^\/|\/$/g, '')
-    const route = path === 'runs' || path.startsWith('runs/') ? path : `runs/${path}`
-    const oldTab = location.hash.slice(1)
-    const tab = TABS.includes(oldTab) ? `?tab=${oldTab}` : ''
-    history.replaceState({}, '', `/#/${route}${tab}`)
+  const hash = location.hash.replace(/^#\/?/, '')
+  if (hash && ['/', '/index.html'].includes(location.pathname)) {
+    const [path, query] = hash.split('?')
+    const route = ROUTES.includes(path.split('/')[0]) ? path : TABS.includes(path) ? '' : path
+    history.replaceState({}, '', `/${route}${query ? `?${query}` : ''}`)
     return
   }
-  if (location.hash && !location.hash.startsWith('#/'))
-    history.replaceState({}, '', `${location.pathname}#/${location.hash.slice(1)}`)
+  const path = location.pathname.replace(/^\/|\/$/g, '')
+  if (path && path !== 'index.html' && !ROUTES.includes(path.split('/')[0])) {
+    const tab = TABS.includes(hash) ? `?tab=${hash}` : ''
+    history.replaceState({}, '', `/runs/${path}${tab}`)
+  }
 }

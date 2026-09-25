@@ -25,6 +25,8 @@ function handler(event) {
 
   var uri = request.uri;
   if (uri.indexOf('/api/') === 0 || uri.indexOf('/auth/') === 0 || uri.indexOf('/raw/') === 0) return request;
+  // Pages serve.py renders itself (their own <head>, and .md / .json twins), and what agents read.
+  if (/^\/(harnesses|tasks|runs)(\/|\.|$)/.test(uri) || uri === '/mcp' || /^\/(llms(-full)?\.txt|sitemap\.xml|sitemaps\/)/.test(uri)) return request;
 
   // An allowlist, not "does the last segment contain a dot".  evals.py builds a run id out of a
   // repo slug that keeps dots (dlants/magenta.nvim -> ...magenta.nvim), so a legacy /<run-id> link

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { getEval } from '../lib/api'
+import { inProgress } from '../lib/evaluation'
 import type { EvalEvent, EvalState } from '../lib/types'
 
 /**
  * Follow one evaluation: poll serve.py with an event cursor every 1.5 s while it runs, keep every event,
- * and stop once it has finished (the last answer carries the result).
+ * and stop once it has finished (queued and running are both still going) (the last answer carries the result).
  */
 export function useEvaluation(id: string | null | undefined) {
   const [state, setState] = useState<EvalState | null>(null)
@@ -22,7 +23,7 @@ export function useEvaluation(id: string | null | undefined) {
         next = s.next
         if (s.events.length) setEvents(prev => [...prev, ...s.events])
         setState(s); setError(null)
-        if (s.eval.status === 'running') timer = setTimeout(poll, 1500)
+        if (inProgress(s.eval.status)) timer = setTimeout(poll, 1500)
       } catch (e) {
         if (ac.signal.aborted) return
         setError(e instanceof Error ? e.message : String(e))

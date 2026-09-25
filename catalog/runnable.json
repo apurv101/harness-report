@@ -1,0 +1,157 @@
+{
+ "about": "Candidate tasks the site may offer. A candidate is runnable once its newest line in oracle.jsonl says reward 1 (./run.sh oracle).",
+ "tasks": [
+  {
+   "taskset": "aider_polyglot",
+   "task": "polyglot_cpp_allergies"
+  },
+  {
+   "taskset": "aider_polyglot",
+   "task": "polyglot_go_palindrome-products"
+  },
+  {
+   "taskset": "aider_polyglot",
+   "task": "polyglot_java_pov"
+  },
+  {
+   "taskset": "aider_polyglot",
+   "task": "polyglot_javascript_triangle"
+  },
+  {
+   "taskset": "aider_polyglot",
+   "task": "polyglot_python_bowling"
+  },
+  {
+   "taskset": "aider_polyglot",
+   "task": "polyglot_python_connect"
+  },
+  {
+   "taskset": "aider_polyglot",
+   "task": "polyglot_rust_bowling"
+  },
+  {
+   "taskset": "swebench-verified",
+   "task": "psf__requests-5414"
+  },
+  {
+   "taskset": "swebench-verified",
+   "task": "sphinx-doc__sphinx-10323"
+  },
+  {
+   "taskset": "swebench-verified",
+   "task": "sphinx-doc__sphinx-8595"
+  },
+  {
+   "taskset": "quixbugs",
+   "task": "quixbugs-java-flatten"
+  },
+  {
+   "taskset": "quixbugs",
+   "task": "quixbugs-python-pascal"
+  },
+  {
+   "taskset": "quixbugs",
+   "task": "quixbugs-python-sieve"
+  },
+  {
+   "taskset": "humanevalfix",
+   "task": "python-11"
+  },
+  {
+   "taskset": "humanevalfix",
+   "task": "python-12"
+  },
+  {
+   "taskset": "humanevalfix",
+   "task": "python-21"
+  },
+  {
+   "taskset": "usaco",
+   "task": "1090"
+  },
+  {
+   "taskset": "usaco",
+   "task": "761"
+  },
+  {
+   "taskset": "usaco",
+   "task": "785"
+  },
+  {
+   "taskset": "spider2-dbt",
+   "task": "divvy001"
+  },
+  {
+   "taskset": "spider2-dbt",
+   "task": "nba001"
+  },
+  {
+   "taskset": "spider2-dbt",
+   "task": "tickit002"
+  },
+  {
+   "taskset": "bird-bench",
+   "task": "card_games__372"
+  },
+  {
+   "taskset": "bird-bench",
+   "task": "student_club__1342"
+  },
+  {
+   "taskset": "bird-bench",
+   "task": "toxicology__315"
+  },
+  {
+   "taskset": "bigcodebench_hard_complete",
+   "task": "bigcodebench_1057"
+  },
+  {
+   "taskset": "bigcodebench_hard_complete",
+   "task": "bigcodebench_162"
+  },
+  {
+   "taskset": "bigcodebench_hard_complete",
+   "task": "bigcodebench_360"
+  },
+  {
+   "taskset": "algotune",
+   "task": "algotune-vectorized-newton"
+  },
+  {
+   "taskset": "algotune",
+   "task": "algotune-vertex-cover"
+  },
+  {
+   "taskset": "evoeval",
+   "task": "14"
+  },
+  {
+   "taskset": "evoeval",
+   "task": "54"
+  },
+  {
+   "taskset": "crustbench",
+   "task": "crustbench-bigint"
+  },
+  {
+   "taskset": "crustbench",
+   "task": "crustbench-clog"
+  },
+  {
+   "taskset": "crustbench",
+   "task": "crustbench-geofence"
+  },
+  {
+   "taskset": "dabstep",
+   "task": "dabstep-26"
+  },
+  {
+   "taskset": "dabstep",
+   "task": "dabstep-43"
+  },
+  {
+   "taskset": "dabstep",
+   "task": "dabstep-58"
+  }
+ ]
+}

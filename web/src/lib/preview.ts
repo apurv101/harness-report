@@ -9,6 +9,8 @@ const KEY = 'harness-report-site-preview-v1'
 export interface PreviewState {
   connected?: boolean
   repo?: string
+  /** the chosen repository's GitHub language and description — what the first task is picked from */
+  repoMeta?: { language?: string; description?: string } | null
   result?: 'example-passed' | null
   /** the real evaluation the first-task step started (served by serve.py), whatever its outcome */
   evalId?: string | null

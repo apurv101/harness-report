@@ -24,6 +24,7 @@ export function RunDetailPage() {
   useDocumentTitle(bundle ? `${bundle.run} · ${bundle.run_json.harness?.name || ''}` : 'Harness Report')
 
   const crumb = <><Link to="/runs">Evaluations</Link> / {runId}</>
+  const seg = encodeURIComponent
   if (error && !bundle) return <RunsShell crumb={crumb}><LoadError message={error} onRetry={reload} /></RunsShell>
   if (!bundle) return <RunsShell crumb={crumb}><p className="empty" role="status">Loading results…</p></RunsShell>
 
@@ -54,6 +55,8 @@ export function RunDetailPage() {
             </a>
           : '—'}
         {harness.commit && <> <span className="mono small">@ {harness.commit.slice(0, 10)}</span></>}
+        {harness.name && <> · <Link to={`/harnesses/${seg(harness.name)}`}>{harness.name}</Link></>}
+        {harbor && run.task?.name && <> · <Link to={`/tasks/${seg(run.task.taskset || '')}/${seg(run.task.name)}`}>{run.task.taskset} / {run.task.name}</Link></>}
         {' · '}<StatusPill run={run} />
         {live && <> · <span className="tl-live">● following, updating every 3s</span></>}
         {harbor && <>

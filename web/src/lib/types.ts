@@ -243,8 +243,8 @@ export interface RepoOption {
   visibility: 'Public' | 'Private'
 }
 
-/** One evaluation started from the site: run.sh on a repo × the bowling task.  See evals.py. */
-export type EvalStatus = 'running' | 'done' | 'failed' | 'cancelled'
+/** One evaluation started from the site: run.sh on a repo × one runnable task.  See evals.py. */
+export type EvalStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
 
 export interface Evaluation {
   id: string
@@ -254,6 +254,7 @@ export interface Evaluation {
   task: string
   /** runs/<run>: the run folder, listed on the Runs page from the moment it starts */
   run: string
+  harness?: string
   user?: string | null
   status: EvalStatus
   started: string
@@ -294,4 +295,129 @@ export interface EvalState {
   live: EvalLive
   /** the run's summary (reward, tests, calls) once it has finished */
   result: RunSummary | null
+}
+
+/* ---------------------------------------------------------------- harnesses, tasks, recommendations (lib/pages.py) */
+
+/** How one harness did on one task, or one task by one harness: runs folded, newest last. */
+export interface Outcomes {
+  runs: number
+  passes: number
+  last?: string | null
+  last_run?: string | null
+  last_outcome?: 'pass' | 'fail' | 'error' | 'running'
+  last_reward?: number | string | null
+  last_tests?: Tests | null
+}
+
+export interface HarnessProfile {
+  use_case?: string | null
+  domains?: string[]
+  languages?: string[]
+  capabilities?: string[]
+  not_for?: string[]
+  evidence?: string
+  source?: string
+  commit?: string
+}
+
+export interface HarnessCard {
+  harness: string
+  repo?: string | null
+  commit?: string | null
+  api_style?: string | null
+  summary?: string | null
+  runs: number
+  finished: number
+  passes: number
+  tasks_tried: number
+  tasks_passed: number
+  tasksets?: string[]
+  results?: Record<string, Outcomes>
+  models?: string[]
+  last_run?: string | null
+  last_run_id?: string | null
+  use_case?: string | null
+  domains?: string[] | null
+}
+
+export interface Rec {
+  taskset: string
+  task: string
+  why?: string | null
+  score?: number | null
+  domain?: string | null
+  language?: string | null
+}
+
+export interface Recs {
+  recs: Rec[]
+  source: 'llm' | 'rules' | string
+  based_on_run?: string | null
+  at?: string
+}
+
+/** A run cut to what a list needs (lib/pages.py run_row). */
+export interface RunRow {
+  run: string
+  started?: string
+  harness?: string | null
+  task?: { taskset?: string; name?: string } | null
+  model?: string
+  reward?: number | string | null
+  tests?: Tests | null
+  calls?: number | null
+  seconds?: number | null
+  outcome: 'pass' | 'fail' | 'error' | 'running'
+}
+
+export interface HarnessPageData {
+  harness: HarnessCard
+  profile: HarnessProfile | null
+  recommendations: Recs | null
+  runs: RunRow[]
+}
+
+export interface TasksetCard {
+  taskset: string
+  path?: string
+  n_tasks: number
+  n_runnable: number
+  domain?: string | null
+  languages?: string[]
+  categories?: string[]
+  owner_org?: string | null
+  grading?: string | null
+  task_kind?: string | null
+  url_repo?: string | null
+  url_paper?: string | null
+  name?: string | null
+  sample_instruction?: string | null
+}
+
+export interface TaskCard {
+  taskset: string
+  task: string
+  difficulty?: string
+  category?: string
+  language?: string
+  tags?: string[]
+  runnable?: boolean
+  compose?: boolean
+  instruction?: string | null
+  instruction_truncated?: boolean
+  agent_timeout?: number
+  oracle?: { reward?: number | string | null; platform?: string; at?: string } | null
+  results?: Record<string, Outcomes>
+  runs?: number
+}
+
+export interface TasksetPageData { taskset: TasksetCard; tasks: TaskCard[]; next: string | null }
+export interface TaskPageData { task: TaskCard; runs: RunRow[] }
+
+/** What the site suggests a repo starts with (GET /api/first-task). */
+export interface FirstTask extends Rec {
+  source: string
+  harness: string
+  recs: Rec[]
 }

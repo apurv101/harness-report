@@ -1,0 +1,27 @@
+{
+  "use_case": "Hand it a GitHub issue or task and it works in a repo, either locally or in a Docker/Singularity sandbox, using only bash commands: it reads code, writes a reproduction script, edits files with sed/heredocs, re-runs to check the fix, and submits a git patch. It is used both as the `mini` CLI and for batch SWE-bench-style benchmark runs.",
+  "domains": [
+    "swe"
+  ],
+  "languages": [
+    "python"
+  ],
+  "capabilities": [
+    "runs-shell",
+    "edits-files",
+    "runs-tests",
+    "uses-git"
+  ],
+  "not_for": [
+    "no dedicated web browsing or search tool; bash is its only tool",
+    "no GUI or computer-use interaction",
+    "no persistent shell session: each command runs in a fresh subshell, so cd and environment variables do not carry over",
+    "not built for data/SQL, ops or other non-coding domains beyond whatever bash can do"
+  ],
+  "evidence": "README.md (lines 42-50, 71-77) says it has no tools other than bash and runs each action with subprocess.run, and it reports >74% on SWE-bench Verified. src/minisweagent/config/mini.yaml has the prompt \"Please solve this issue\", with a workflow of reproduce \u2192 edit with sed/cat \u2192 verify \u2192 echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT. config/benchmarks/swebench.yaml tells it to change non-test files in /testbed and submit a git patch. config/benchmarks/programbench.yaml asks it to recreate a program from observed behaviour, with a compile.sh. Environments include local, docker, singularity, bubblewrap, swerex and modal.",
+  "source": "claude -p",
+  "commit": "04d809ceab9df28f9adaed044884180159172930",
+  "seconds": 17,
+  "cost_usd": 0.1605984,
+  "at": "2026-09-24T23:04:12"
+}

@@ -1,7 +1,8 @@
 """evals.py — start run.sh from the site and follow it.  One evaluation at a time on this machine.
 
-An evaluation is one click on "Run task": run.sh on the chosen repository and the bowling task.  It lives in
-evals/<id>/:
+An evaluation is one click on "Run task": run.sh on the chosen repository and one Harbor task.  The task is the
+caller's pick from the runnable pool (lib/tasks.py: a candidate whose reference solution passes its own tests),
+else the harness's top recommendation (lib/recommend.py), else bowling.  It lives in evals/<id>/:
 
     eval.json      who started it, on what, the pid, and its status: running | done | failed | cancelled
     events.jsonl   what run.sh emits with HR_EVENTS set: stages, the recipe decision, the run folder, the result
@@ -32,7 +33,8 @@ sys.path.insert(0, os.path.join(HERE, "lib"))
 import ddb, leases, store                           # the DynamoDB copy: the evaluation, its events, its console log
 EVALS = os.path.join(HERE, "evals")
 RUNS = os.path.join(HERE, "runs")           # run.sh always writes here
-TASKSET, TASK = "aider_polyglot", "polyglot_python_bowling"
+DEFAULT = ("aider_polyglot", "polyglot_python_bowling")     # the first task when nothing better is known
+DAILY_CAP = int(os.environ.get("HR_DAILY_CAP") or 5)        # evaluations one login may start per UTC day
 REPO_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
 EVAL_ID = re.compile(r"^\d{8}T\d{6}-[a-z0-9.-]{1,12}$")
 
@@ -50,6 +52,54 @@ LIVE = {}       # eval id -> incremental read state of the run's calls.jsonl
 
 class Busy(Exception):
     def __init__(self, ev): super().__init__("another evaluation is running"); self.eval = ev
+
+
+class Refused(Exception):
+    """A request this server will not start: a task the site does not offer, or a login over its daily cap."""
+
+
+harness_name = store.harness_name
+
+
+def _runnable():
+    """{(taskset, task)} the site may start — the RUNNABLE rows when a table answers, else the catalog on disk."""
+    try:
+        if store.available(): return {(t["taskset"], t["task"]) for t in store.runnable_list()}
+    except ddb.Error: pass
+    try:
+        import tasks
+        return tasks.runnable_set()
+    except (OSError, ValueError, ImportError): return set()
+
+
+def pick_task(repo, taskset=None, task=None):
+    """The (taskset, task) an evaluation runs.  An explicit pick must be in the runnable pool; with no pick, the
+    harness's first recommendation that is still runnable, else the default."""
+    pool = _runnable()
+    if taskset or task:
+        if (taskset, task) not in pool and (taskset, task) != DEFAULT:
+            raise Refused(f"{taskset}/{task} is not a task the site can run yet")
+        return taskset, task
+    try:
+        recs = store.harness_recs(harness_name(repo)) if store.available() else None
+    except ddb.Error: recs = None
+    for r in (recs or {}).get("recs") or []:
+        if (r.get("taskset"), r.get("task")) in pool: return r["taskset"], r["task"]
+    return DEFAULT
+
+
+def check_cap(user):
+    """At most DAILY_CAP evaluations per login per UTC day.  Unsigned local use (user None) is not capped."""
+    if not user or DAILY_CAP <= 0: return
+    today = time.strftime("%Y%m%d", time.gmtime())
+    try: rows = store.evals_list(limit=200) if (QUEUED or store.available()) else []
+    except ddb.Error: rows = []
+    if not rows and os.path.isdir(EVALS):
+        rows = [e for e in (_load(x) for x in os.listdir(EVALS) if EVAL_ID.match(x)) if e]
+    n = sum(1 for e in rows if e.get("user") == user and (e.get("id") or "").startswith(today)
+            and e.get("status") != "cancelled")
+    if n >= DAILY_CAP:
+        raise Refused(f"{user} has started {n} evaluations today; the limit is {DAILY_CAP} a day")
 
 
 def _path(eid, name=""): return os.path.join(EVALS, eid, name)
@@ -104,7 +154,16 @@ def _settle(ev):
     ev["finished"] = ev.get("finished") or time.strftime("%Y-%m-%dT%H:%M:%S")
     if ev["status"] == "failed": ev["error"] = _last_error(ev["id"]) or f"run.sh exited with {ev.get('rc')}; see evals/{ev['id']}/console.log"
     _save(ev)
+    if ev["status"] == "done": after_run(ev)
     return ev
+
+
+def after_run(ev):
+    """A finished run changes what the harness should run next: profile it (once per commit) and re-rank, in a
+    detached process so neither a request thread nor the runner waits the minute that takes."""
+    if not (os.environ.get("HR_DDB") or os.environ.get("HR_DDB_ENDPOINT") or os.environ.get("HR_TABLE")): return
+    import recommend
+    recommend.spawn_refresh(ev.get("harness") or harness_name(ev["repo"]))
 
 
 def get(eid):
@@ -133,9 +192,9 @@ def _current():
     return None
 
 
-def _record(repo, eid, user, status):
-    return {"id": eid, "repo": repo, "url": f"https://github.com/{repo}", "taskset": TASKSET, "task": TASK,
-            "run": f"{eid}-{TASK}", "user": user, "status": status,
+def _record(repo, eid, user, status, taskset=DEFAULT[0], task=DEFAULT[1]):
+    return {"id": eid, "repo": repo, "url": f"https://github.com/{repo}", "taskset": taskset, "task": task,
+            "harness": harness_name(repo), "run": f"{eid}-{task}", "user": user, "status": status,
             "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "finished": None, "rc": None,
             "cancelled": False, "error": None, "pid": None}
 
@@ -145,7 +204,7 @@ def _eid(repo):
     return time.strftime("%Y%m%dT%H%M%S") + "-" + slug
 
 
-def enqueue(repo, user=None, installation=None):
+def enqueue(repo, user=None, installation=None, taskset=None, task=None):
     """Put one evaluation on the lease queue and record it as queued.  What the hosted API does instead of
     starting anything: it owns the record, a runner owns the work.
 
@@ -153,11 +212,13 @@ def enqueue(repo, user=None, installation=None):
     queue, and the runner can mint its own from the app key it already needs for everything else."""
     cur = store.running_eval()
     if cur: raise Busy(cur)
+    check_cap(user)
+    taskset, task = pick_task(repo, taskset, task)
     eid = _eid(repo)
-    ev = _record(repo, eid, user, "queued")
+    ev = _record(repo, eid, user, "queued", taskset, task)
     store.publish_card(ev)                       # visible on the page before any runner has seen it
     try:
-        leases.send({"eval": eid, "repo": repo, "url": ev["url"], "taskset": TASKSET, "task": TASK,
+        leases.send({"eval": eid, "repo": repo, "url": ev["url"], "taskset": taskset, "task": task,
                     "run": ev["run"], "user": user, "installation": installation})
     except leases.Error as e:
         ev.update(status="failed", finished=time.strftime("%Y-%m-%dT%H:%M:%S"), error=f"could not queue it: {e}")
@@ -166,22 +227,25 @@ def enqueue(repo, user=None, installation=None):
     return ev
 
 
-def start(repo, user=None, token=None, installation=None):
-    """Start run.sh on github.com/<repo> × the bowling task.  Raises Busy while another evaluation runs.
+def start(repo, user=None, token=None, installation=None, taskset=None, task=None):
+    """Start run.sh on github.com/<repo> × one runnable task.  Raises Busy while another evaluation runs, and
+    Refused for a task the site does not offer or a login over its daily cap.
 
     In queue mode nothing starts here; the lease goes on the queue and a runner picks it up."""
-    if QUEUED: return enqueue(repo, user=user, installation=installation)
+    if QUEUED: return enqueue(repo, user=user, installation=installation, taskset=taskset, task=task)
     with LOCK:
         cur = _current()
         if cur: raise Busy(cur)
+        check_cap(user)
+        taskset, task = pick_task(repo, taskset, task)
         eid = _eid(repo)
         os.makedirs(_path(eid))
-        ev = _record(repo, eid, user, "running")
+        ev = _record(repo, eid, user, "running", taskset, task)
         env = dict(os.environ, HR_EVENTS=_path(eid, "events.jsonl"))
         env.pop("HR_GIT_TOKEN", None)
         if token: env["HR_GIT_TOKEN"] = token
         with open(_path(eid, "console.log"), "wb") as log:
-            p = subprocess.Popen(["bash", os.path.join(HERE, "run.sh"), ev["url"], "--taskset", TASKSET, "--tasks", TASK,
+            p = subprocess.Popen(["bash", os.path.join(HERE, "run.sh"), ev["url"], "--taskset", taskset, "--tasks", task,
                                   "--run-id", eid], cwd=HERE, env=env, stdin=subprocess.DEVNULL, stdout=log,
                                  stderr=subprocess.STDOUT, start_new_session=True)
         PROCS[eid] = p; ev["pid"] = p.pid

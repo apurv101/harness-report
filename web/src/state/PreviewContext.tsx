@@ -7,7 +7,7 @@ interface PreviewValue extends PreviewState {
   /** Signed in for real, or simulated far enough to continue the flow. */
   signedIn: boolean
   connect: () => void
-  selectRepo: (repo: string) => void
+  selectRepo: (repo: string, meta?: PreviewState['repoMeta']) => void
   setResult: (result: PreviewState['result']) => void
   setEval: (evalId: string | null) => void
 }
@@ -30,7 +30,7 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
     ...state,
     signedIn: session?.auth ? !!session.user : !!state.connected,
     connect: () => update({ connected: true }),
-    selectRepo: (repo: string) => update({ repo, result: null, evalId: null }),
+    selectRepo: (repo: string, meta?: PreviewState['repoMeta']) => update({ repo, repoMeta: meta ?? null, result: null, evalId: null }),
     setResult: (result: PreviewState['result']) => update({ result }),
     setEval: (evalId: string | null) => update({ evalId }),
   }), [state, session, update])

@@ -67,6 +67,21 @@ A taskset is a directory of task folders, given as a path or a name under `$HARB
 Pick tasks with `--tasks a,b`, `--grep re`, `--limit N` or `--all`; `-k N` repeats each task N times so pass^k
 and flip rate exist. Each task x k is its own run folder, and the invocation ends with a task x k reward table.
 
+The tests run the way Harbor runs them: on an open network with none of the agent phase's proxy settings, so a
+task's own network assertions are not answered by the proxy (verify-phase traffic is therefore not in
+`egress.jsonl`).
+
+**The oracle gate.** `./run.sh oracle <taskset> a,b` runs each task's `solution/solve.sh` in place of an agent —
+same image, same `tests/test.sh`, no proxy, no model — and appends the reward to `catalog/oracle.jsonl`. The site
+only offers tasks that are candidates in `catalog/runnable.json` *and* whose newest oracle result is 1: a task
+whose reference solution fails its own tests (aider_polyglot `polyglot_java_pov`, algotune
+`algotune-vectorized-newton`) would mark every harness as failing.
+
+**The corpus in the table.** `./run.sh ddb sync --tasks` publishes all ~93.5k tasks in `$HARBOR_TASKS`
+(`TASK-INDEX.json`, each `task.toml` and `instruction.md`), joined to `catalog/index.jsonl` for domain, owner and
+grading (`lib/tasks.py`), as taskset and task rows — the site has no disk, so a task page is only what the table
+holds. Each finished run folds itself into its task's `results` and its harness card.
+
 ## The proxy
 
 `proxy.py` speaks the OpenAI chat-completions API and the Anthropic messages API on the harness side (tool
@@ -188,11 +203,26 @@ npm --prefix web run dev                    # http://localhost:5173, /api + /aut
 npm --prefix web run typecheck              # tsc --noEmit, also part of build
 ```
 
-`/` opens the minimal “Evaluate your harness” landing page. `/#/connect` starts the GitHub flow;
-`/#/runs` lists and searches actual local runs. `/#/runs/<run-id>` opens a run's trajectory, calls,
-verifier, recipe, logs, and files. The selected tab is a `?tab=` query, so it survives a refresh.
-Older `#runs/<id>` hashes and `/<run-id>` paths are rewritten to the current form on load.
-`/api/runs`, `/api/run/<run-id>`, and `/raw/<run-id>/<file>` provide the underlying data.
+`/` opens the minimal “Evaluate your harness” landing page. `/connect` starts the GitHub flow;
+`/runs` lists and searches runs, and `/runs/<run-id>` opens a run's trajectory, calls, verifier, recipe, logs,
+and files (the tab is a `?tab=` query). `/harnesses/<name>` is one harness — what it is for, results per task,
+its runs, and the tests recommended next; `/tasks`, `/tasks/<taskset>` and `/tasks/<taskset>/<task>` browse the
+Harbor corpus with every harness's results. Routes are real paths (BrowserRouter); older `#/…` and `#runs/<id>`
+hashes and `/<run-id>` paths are rewritten on load.
+
+**For agents and crawlers** (`lib/pages.py`, `lib/mcp.py`). Every harness, taskset, task and run page is served
+by `serve.py` with its own `<title>`, description and canonical, plus a `<noscript>` Markdown copy; add `.md` or
+`.json` to any of those URLs for the Markdown or the object. `/llms.txt` (and `/llms-full.txt`) index the site
+for LLMs, `/sitemap.xml` is a sitemap index with one sitemap per taskset, and `POST /mcp` is a read-only MCP
+server (streamable HTTP, stateless) with `search_tasks`, `get_task`, `list_tasksets`, `list_harnesses`,
+`get_harness`, `get_run`, `recommend_tasks` and `run_url` — starting a run stays behind GitHub sign-in.
+
+**What to run next** (`lib/recommend.py`). Before a first run, the task is picked by rules from the repo's GitHub
+language and description (`GET /api/first-task`). After every finished run, the runner profiles the harness once
+per commit (`claude -p` with only Read/Glob/Grep, cached in `profiles/<name>@<commit>.json`) and ranks the
+runnable pool for it with a model (`RECOMMEND_MODEL`, default haiku; the rules when that fails), written as
+`HARNESS#<name>/RECS`. The result page polls for them and each one starts with one click. `HR_DAILY_CAP`
+(default 5) caps evaluations per login per day.
 
 **Runs from the site.** Step 3's "Run task" is real, and `HR_EVALS` decides who does the work:
 

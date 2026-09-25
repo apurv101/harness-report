@@ -1,19 +1,27 @@
-import type { EvalEvent, EvalLive, EvalState } from './types'
+import type { EvalEvent, EvalLive, EvalState, EvalStatus } from './types'
 
-/** The bowling task the first real run uses: aider_polyglot / polyglot_python_bowling. */
-export const BOWLING = {
-  title: 'Bowling',
-  summary: 'Score a game of bowling: frames, spares, strikes and the tenth-frame fill balls.',
-  tests: 31,
-  source: 'aider_polyglot · polyglot_python_bowling',
+/** The default first task, when nothing better is known: aider_polyglot / polyglot_python_bowling. */
+export const BOWLING = { taskset: 'aider_polyglot', task: 'polyglot_python_bowling' }
+
+/** Queued (waiting for a runner) and running both mean "keep following it". */
+export const inProgress = (s?: EvalStatus | null) => s === 'queued' || s === 'running'
+
+/** A task's name as a person reads it: polyglot_python_bowling → Python bowling, psf__requests-5414 → psf/requests #5414. */
+export function taskTitle(task?: string | null): string {
+  if (!task) return 'Task'
+  const poly = /^polyglot_([a-z]+)_(.+)$/.exec(task)
+  if (poly) return `${poly[1][0].toUpperCase()}${poly[1].slice(1)} ${poly[2].replace(/-/g, ' ')}`
+  const swe = /^(.+)__(.+)-(\d+)$/.exec(task)
+  if (swe) return `${swe[1]}/${swe[2]} #${swe[3]}`
+  return task.replace(/[_-]+/g, ' ')
 }
 
 /** The four stages a real run shows, and which of run.sh's own stages belong to each. */
 export const LIVE_STAGES = [
   ['Fetch repository', 'Clone your harness at its current commit.'],
   ['Prepare environment', 'Reuse or write the Docker setup, then build it for linux/amd64.'],
-  ['Run bowling', 'Your agent works on the task; every model call goes through the recording proxy.'],
-  ['Verify', `Run the task’s ${BOWLING.tests} tests against what the agent wrote.`],
+  ['Run the task', 'Your agent works on the task; every model call goes through the recording proxy.'],
+  ['Verify', 'Run the task’s own tests against what the agent wrote.'],
 ] as const
 
 function stageIndex(e: EvalEvent): number | null {

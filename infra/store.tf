@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------- the run store
 #
-# The schema is lib/store.py's docstring: one table, generic pk/sk, one index.  Mirrored here rather
+# The schema is lib/store.py's docstring: one table, generic pk/sk, two indexes.  Mirrored here rather
 # than created by `./run.sh ddb start`, which is the laptop's path.  Everything is on-demand: the
 # traffic is a person opening a run, not a steady rate anyone can provision for.
 
@@ -26,6 +26,14 @@ resource "aws_dynamodb_table" "store" {
     name = "gsi1sk"
     type = "S"
   }
+  attribute {
+    name = "gsi2pk"
+    type = "S"
+  }
+  attribute {
+    name = "gsi2sk"
+    type = "S"
+  }
 
   # "every run and every recipe of one harness" in one query.
   #
@@ -42,6 +50,22 @@ resource "aws_dynamodb_table" "store" {
     }
     key_schema {
       attribute_name = "gsi1sk"
+      key_type       = "RANGE"
+    }
+  }
+
+  # "every harness's runs on one task" in one query — what a task page lists.  Only Harbor run cards carry
+  # gsi2pk, so the index holds runs and nothing else.
+  global_secondary_index {
+    name            = "task"
+    projection_type = "ALL"
+
+    key_schema {
+      attribute_name = "gsi2pk"
+      key_type       = "HASH"
+    }
+    key_schema {
+      attribute_name = "gsi2sk"
       key_type       = "RANGE"
     }
   }

@@ -1,4 +1,7 @@
-import type { EvalConsole, EvalState, GithubRepo, Installation, RepoOption, RunBundle, RunFiles, RunSummary, Session } from './types'
+import type {
+  EvalConsole, EvalState, FirstTask, GithubRepo, HarnessCard, HarnessPageData, Installation, Recs, RepoOption, RunBundle,
+  RunFiles, RunSummary, Session, TaskCard, TaskPageData, TasksetCard, TasksetPageData,
+} from './types'
 
 /** Every call the frontend makes.  serve.py answers all of them; the static site answers none. */
 async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -54,8 +57,42 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
   return data as T
 }
 
-/** Start run.sh on this repository and the bowling task.  Fails with a message while another one runs. */
-export const startEval = (repo: string) => postJSON<EvalState>('/api/evals', { repo })
+/** Start run.sh on this repository and one runnable task (the server's pick when none is given).  Fails with a
+ *  message while another one runs, for a task the site does not offer, or over the daily limit. */
+export const startEval = (repo: string, pick?: { taskset: string; task: string } | null) =>
+  postJSON<EvalState>('/api/evals', pick ? { repo, taskset: pick.taskset, task: pick.task } : { repo })
+
+const seg = encodeURIComponent
+
+/** Every harness that has been run, with its tallies. */
+export const getHarnesses = (signal?: AbortSignal) => getJSON<{ harnesses: HarnessCard[] }>('/api/harnesses', signal)
+
+/** One harness: its card, what it is for, the tests recommended next, and its runs. */
+export const getHarness = (name: string, signal?: AbortSignal) => getJSON<HarnessPageData>(`/api/harnesses/${seg(name)}`, signal)
+
+/** The tests recommended next for a harness, or null before anything has ranked them. */
+export const getRecs = (name: string, signal?: AbortSignal) => getJSON<Recs | null>(`/api/harnesses/${seg(name)}/recs`, signal)
+
+export const getTasksets = (signal?: AbortSignal) =>
+  getJSON<{ tasksets: TasksetCard[]; domains: string[] }>('/api/tasksets', signal)
+
+/** One page of a taskset's tasks; `after` is the cursor the previous page returned. */
+export const getTaskset = (taskset: string, after?: string | null, signal?: AbortSignal) =>
+  getJSON<TasksetPageData>(`/api/tasksets/${seg(taskset)}${after ? `?after=${seg(after)}` : ''}`, signal)
+
+export const getTask = (taskset: string, task: string, signal?: AbortSignal) =>
+  getJSON<TaskPageData>(`/api/tasks/${seg(taskset)}/${seg(task)}`, signal)
+
+/** Every task the site can start. */
+export const getRunnable = (signal?: AbortSignal) => getJSON<{ tasks: TaskCard[] }>('/api/runnable', signal)
+
+/** The task a repository should start with, from its recommendations or, before any run, its language and description. */
+export const getFirstTask = (repo: string, meta?: { language?: string; description?: string }, signal?: AbortSignal) => {
+  const q = new URLSearchParams({ repo })
+  if (meta?.language && meta.language !== 'Repository') q.set('language', meta.language)
+  if (meta?.description) q.set('description', meta.description)
+  return getJSON<FirstTask | null>(`/api/first-task?${q}`, signal)
+}
 
 /** The evaluation running on this machine now, or null. */
 export const getCurrentEval = (signal?: AbortSignal) => getJSON<EvalState | null>('/api/evals/current', signal)

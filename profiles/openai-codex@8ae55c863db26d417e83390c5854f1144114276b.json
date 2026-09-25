@@ -1,0 +1,33 @@
+{
+  "use_case": "A developer runs `codex` in their terminal (or IDE/desktop app) and asks it to read, edit, and test code in a local repository: fixing bugs, adding features, running shell commands, and reviewing changes, all in a sandbox with approval prompts.",
+  "domains": [
+    "swe"
+  ],
+  "languages": [
+    "javascript",
+    "python",
+    "rust"
+  ],
+  "capabilities": [
+    "edits-files",
+    "runs-shell",
+    "runs-tests",
+    "uses-git",
+    "browses-web",
+    "multi-agent",
+    "calls-apis",
+    "long-horizon"
+  ],
+  "not_for": [
+    "Not a GUI or computer-use agent; it works through terminal commands and file patches",
+    "Not made for data or SQL analytics, or for non-coding office work",
+    "Needs the OpenAI Responses API (a ChatGPT login or API key); other providers need a shim",
+    "Commands run in a sandbox, and network access is off by default"
+  ],
+  "evidence": "The README (line 1) says: \"Codex CLI is a coding agent from OpenAI that runs locally on your computer.\" The system prompt codex-rs/core/gpt-5.2-codex_prompt.md starts with \"running as a coding agent in the Codex CLI\" and covers apply_patch edits, git worktree safety, the plan tool, code review, and frontend tasks. Tool handlers in codex-rs/core/src/tools/handlers/ include shell_spec.rs, unified_exec/exec_command.rs, apply_patch.rs, plan.rs, view_image.rs, mcp.rs, and multi_agents/spawn.rs, and spec_plan.rs adds a hosted web_search tool.",
+  "source": "claude -p",
+  "commit": "8ae55c863db26d417e83390c5854f1144114276b",
+  "seconds": 20,
+  "cost_usd": 0.2264716,
+  "at": "2026-09-24T22:59:20"
+}

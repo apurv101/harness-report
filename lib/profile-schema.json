@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["use_case", "domains", "languages", "capabilities", "not_for", "evidence"],
+  "properties": {
+    "use_case": {"type": "string", "description": "One sentence: what a person uses this harness for, in their words, not the README's slogan."},
+    "domains": {"type": "array", "items": {"type": "string", "enum": ["swe", "data-sql", "devops-sre", "ml-research", "science-math", "web-research", "tool-use", "computer-use", "office-docs", "finance", "legal", "healthcare", "life-sciences", "security", "customer-service", "enterprise-ops", "reasoning-knowledge", "games", "multimodal", "chip-hardware", "ai-safety", "other"]},
+                "description": "The kinds of work it is built for, most central first (1-4)."},
+    "languages": {"type": "array", "items": {"type": "string"}, "description": "Programming languages it is meant to write or edit, lower-case (python, rust, go, java, javascript, typescript, cpp, sql, ...). Empty if it does not write code."},
+    "capabilities": {"type": "array", "items": {"type": "string", "enum": ["edits-files", "runs-shell", "runs-tests", "browses-web", "queries-sql", "uses-git", "multi-agent", "long-horizon", "reads-docs", "calls-apis", "gui"]}},
+    "not_for": {"type": "array", "items": {"type": "string"}, "description": "Kinds of task it is plainly not meant for, if any."},
+    "evidence": {"type": "string", "description": "The files or README lines this is based on, in one or two sentences."}
+  }
+}

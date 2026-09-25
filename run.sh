@@ -10,6 +10,7 @@
 #   ./run.sh tasks aider_polyglot [--grep re]                  list the tasks in a taskset
 #   ./run.sh runs [--grep re]                                  list the runs (from each run.json)
 #   ./run.sh view runs/<run-id>                                print the recorded model calls as a conversation
+#   ./run.sh oracle aider_polyglot a,b                         run each task's solution/solve.sh against its own tests
 #   ./run.sh ddb start|stop|reset|status|sync|runs|run <id>     the run store: DynamoDB on the laptop (lib/ddb.sh)
 #
 #   --taskset S   a Harbor taskset: a directory of task folders, or a name under $HARBOR_TASKS/{datasets,hub-datasets,.}
@@ -76,6 +77,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/lib/recipe.sh"     # 3+4. analyze and build
 . "$HERE/lib/proxy.sh"      # 5. proxy
 . "$HERE/lib/execute.sh"    # 6. run
+. "$HERE/lib/oracle.sh"     # the oracle subcommand: a task's reference solution against its own tests
 [ $# -gt 0 ] || { help; exit 0; }
 [ -f "$HERE/.env" ] && { set -a; . "$HERE/.env"; set +a; }
 HARBOR_TASKS="${HARBOR_TASKS:-$HOME/Desktop/harbor-tasks}"
@@ -84,6 +86,7 @@ HARBOR_TASKS="${HARBOR_TASKS:-$HOME/Desktop/harbor-tasks}"
 case "${1:-}" in
   tasks) shift; cmd_tasks "$@"; exit 0 ;;
   ddb)   shift; cmd_ddb   "$@"; exit 0 ;;
+  oracle) shift; cmd_oracle "$@"; exit $? ;;
   runs)  shift; cmd_runs  "$@" ;;   # both exec python3, so neither returns
   view)  shift; cmd_view  "$@" ;;
 esac

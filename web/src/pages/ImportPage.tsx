@@ -26,7 +26,12 @@ export function ImportPage() {
     signal => (live ? getUserRepos(signal) : Promise.resolve([...SAMPLE_REPOS])),
     [live], 'github')
 
-  const choose = (repo: string) => { selectRepo(repo); navigate('/check') }
+  // The repo's language and description travel with it: they are what the first task is picked from.
+  const choose = (repo: string) => {
+    const r = (data || []).find(x => x.name === repo)
+    selectRepo(repo, r ? { language: r.language, description: r.description } : null)
+    navigate('/check')
+  }
   const matches = (data || []).filter(r => r.name.toLowerCase().includes(query.toLowerCase().trim()))
 
   return (

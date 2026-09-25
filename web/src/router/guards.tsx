@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { usePreview } from '../state/PreviewContext'
 
 /** The flow runs in order: sign in, choose a repository, run the task, read the result. */
@@ -10,8 +10,9 @@ export function RequireSignedIn({ children }: { children: ReactElement }) {
 
 export function RequireRepo({ children }: { children: ReactElement }) {
   const { signedIn, repo } = usePreview()
+  const [params] = useSearchParams()
   if (!signedIn) return <Navigate to="/connect" replace />
-  return repo ? children : <Navigate to="/import" replace />
+  return repo || params.get('repo') ? children : <Navigate to="/import" replace />
 }
 
 export function RequireResult({ children }: { children: ReactElement }) {

@@ -12,6 +12,10 @@ locals {
   # `terraform apply` on its own is a deploy.
   lambda_files = toset(concat(
     ["serve.py", "auth.py", "evals.py"],
+    # serve.py fills this page's <head> per harness/task/run for crawlers; `deploy.yml` builds web/ before it
+    # applies, so the file exists whenever Terraform zips the package.
+    ["web/dist/index.html"],
+    ["lib/profile-schema.json", "lib/profile-prompt.md"],
     tolist(fileset("${path.module}/..", "lib/*.py")),
   ))
 

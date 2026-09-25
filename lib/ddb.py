@@ -204,16 +204,21 @@ def get(pk, sk, name=None, consistent=True):
     return item_of(res["Item"]) if res.get("Item") else None
 
 
-def query(pk, prefix=None, index=None, desc=False, limit=None, name=None, attributes=None):
+# Each index's own key attributes.  An index name not listed here is a bug, not a new index.
+INDEX_KEYS = {None: ("pk", "sk"), "harness": ("gsi1pk", "gsi1sk"), "task": ("gsi2pk", "gsi2sk")}
+
+
+def query(pk, prefix=None, index=None, desc=False, limit=None, name=None, attributes=None, after=None):
     """Every item in one partition, optionally narrowed to a sort-key prefix.  Pages until the partition is done
-    (or `limit` items are in hand), which is what every read in this repo wants."""
-    key = "gsi1pk" if index else "pk"
-    sort = "gsi1sk" if index else "sk"
+    (or `limit` items are in hand), which is what every read in this repo wants.  `after` (a base-table sort key)
+    starts the read just past that row — the cursor a paged list hands back to its caller."""
+    key, sort = INDEX_KEYS[index]
     cond, values = f"{key} = :k", {":k": {"S": pk}}
     if prefix: cond, values[":p"] = f"{cond} AND begins_with({sort}, :p)", {"S": prefix}
     req = {"TableName": table(name), "KeyConditionExpression": cond, "ExpressionAttributeValues": values,
            "ScanIndexForward": not desc}
     if index: req["IndexName"] = index
+    if after and not index: req["ExclusiveStartKey"] = {"pk": {"S": pk}, "sk": {"S": after}}
     if attributes:
         req["ProjectionExpression"] = ", ".join(f"#a{i}" for i, _ in enumerate(attributes))
         req["ExpressionAttributeNames"] = {f"#a{i}": a for i, a in enumerate(attributes)}
@@ -233,6 +238,12 @@ def delete_partition(pk, name=None):
     for i in range(0, len(keys), 25):
         call("BatchWriteItem", {"RequestItems": {t: [{"DeleteRequest": {"Key": row_of(k)}} for k in keys[i:i + 25]]}})
     return len(keys)
+
+
+def indexes(name=None):
+    """The names of the table's global secondary indexes, and each one's status."""
+    t = call("DescribeTable", {"TableName": table(name)})["Table"]
+    return {g["IndexName"]: g.get("IndexStatus") for g in t.get("GlobalSecondaryIndexes") or []}
 
 
 def exists(name=None):
