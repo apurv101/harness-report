@@ -24,18 +24,18 @@ data "archive_file" "api" {
 
 # ---------------------------------------------------------------- secrets
 #
-# Created empty and filled out of band (bootstrap.sh secrets, or `aws ssm put-parameter`), so no
-# GitHub key or session secret is ever written into Terraform state or into git.
-
-resource "aws_ssm_parameter" "secret" {
-  for_each = toset(local.secrets)
-
-  name  = "/${local.name}/${each.value}"
-  type  = "SecureString"
-  value = "unset"
-
-  lifecycle { ignore_changes = [value] }
-}
+# Deliberately NOT Terraform resources.  `./bootstrap.sh secrets` creates the three SecureStrings and
+# writes their values; the Lambda reads them by path at cold start; Terraform only ever names the
+# path in an IAM policy.
+#
+# The first attempt did manage them, holding "unset" with `ignore_changes = [value]`, and it was
+# wrong in a way that only CI could show: Terraform *refreshes* every resource it manages, so every
+# plan called ssm:GetParameter — which the deploy role explicitly denies (cicd.tf).  `ignore_changes`
+# governs what Terraform does with a diff, not whether it reads.  Managing them and forbidding CI to
+# read them cannot both be true, and of the two, not reading them is the one worth keeping.
+#
+# The cost is that `terraform destroy` leaves the three parameters behind.  That is the right
+# default for something a person put there by hand.
 
 resource "random_password" "origin" {
   length  = 48

@@ -75,10 +75,17 @@ rotates by tainting `random_password.origin`.
 ## Secrets
 
 Three values never enter Terraform state or git: `GITHUB_CLIENT_SECRET`, `SESSION_SECRET` and the
-app's private key. Terraform creates the SecureStrings holding the literal `unset` and never looks
-at them again (`ignore_changes`); `./bootstrap.sh secrets` pushes the real values out of `../.env`;
-`handler.py` reads them at cold start and treats `unset` as absent, so a stack whose secrets have
-not been filled in serves the runs read-only instead of failing to boot.
+app's private key. **Terraform does not manage them at all** — `./bootstrap.sh secrets` creates the
+SecureStrings and fills them from `../.env`, and `handler.py` reads them at cold start. Missing or
+holding `unset`, they are treated as absent, so a stack whose secrets have not been filled in serves
+the runs read-only instead of failing to boot.
+
+The first version *did* manage them, empty, with `ignore_changes = [value]`. CI proved that wrong:
+Terraform refreshes every resource it manages, so every plan called `ssm:GetParameter`, which the
+deploy role explicitly denies. `ignore_changes` governs what Terraform does with a diff, not whether
+it reads. Managing them and forbidding CI to read them cannot both be true; not reading them won.
+The cost is that `terraform destroy` leaves the three parameters behind — the right default for
+something a person put there by hand.
 
 The GitHub App's client id and app id are public identifiers and are ordinary variables.
 

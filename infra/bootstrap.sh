@@ -10,9 +10,10 @@
 #   AWS_PROFILE=operator ./bootstrap.sh
 #   AWS_PROFILE=operator terraform init && AWS_PROFILE=operator terraform apply
 #
-# `secrets` is safe to re-run: it overwrites the three SecureStrings and nothing else.  It needs the
-# parameters to exist, so run it after the first apply — the first apply creates them holding
-# "unset", and handler.py treats "unset" as absent, so the order never breaks a deploy.
+# `secrets` creates the three SecureStrings as well as filling them, and is safe to re-run.  It does
+# NOT depend on Terraform and can go either side of the first apply: Terraform deliberately does not
+# manage these (api.tf says why), because a resource it manages is a resource it refreshes, and
+# refreshing a SecureString means reading it — which the deploy role is denied.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -44,8 +45,10 @@ state() {
   echo "backend.tf must say: bucket = \"$BUCKET\""
 }
 
-# The three values Terraform is deliberately not allowed to hold.  Read out of ../.env, which is the
-# same file run.sh and auth.py read, so there is one place they are written down.
+# The three values Terraform is deliberately not allowed to hold — nor to know the existence of.
+# Read out of ../.env, the same file run.sh and auth.py read, so there is one place they are
+# written down.  put-parameter --overwrite creates the parameter when it is absent, so this is both
+# the create and the update path.
 secrets() {
   local env_file="../.env"
   [ -f "$env_file" ] || { echo "no $env_file — nothing to push"; return; }
@@ -54,7 +57,8 @@ secrets() {
     local name="$1" value="$2"
     [ -n "$value" ] || { echo "  $name: empty in .env, left alone"; return; }
     aws ssm put-parameter --region "$REGION" --name "/$PROJECT/$name" \
-      --type SecureString --value "$value" --overwrite >/dev/null
+      --type SecureString --value "$value" --overwrite \
+      --description "harness-report: read by the API Lambda at cold start" >/dev/null
     echo "  $name: written to /$PROJECT/$name"
   }
 

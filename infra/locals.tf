@@ -15,8 +15,8 @@ locals {
     tolist(fileset("${path.module}/..", "lib/*.py")),
   ))
 
-  # Written by Terraform as SecureStrings with a placeholder, then filled once by hand or by
-  # bootstrap.sh.  Their values are deliberately not in state: `ignore_changes` keeps them out.
+  # The SecureStrings `./bootstrap.sh secrets` writes.  Named here only so the output can list them;
+  # no resource manages them, and nothing in this module ever reads one.  See api.tf.
   secrets = ["GITHUB_CLIENT_SECRET", "SESSION_SECRET", "GITHUB_APP_KEY"]
 
   tags = {

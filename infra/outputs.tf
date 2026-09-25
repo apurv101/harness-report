@@ -41,6 +41,6 @@ output "lease_queue_url" {
 }
 
 output "secrets_to_fill" {
-  description = "SecureStrings created empty.  ./bootstrap.sh secrets pushes them out of .env."
+  description = "Not managed here.  `./bootstrap.sh secrets` creates and fills these from ../.env."
   value       = [for s in local.secrets : "/${local.name}/${s}"]
 }
