@@ -50,17 +50,23 @@ variable "table_name" {
   default     = "harness-report"
 }
 
-# The GitHub App's public half.  The client secret and the .pem are SecureStrings in SSM, never here.
+# The GitHub App's public half (github.com/apps/harness-report).  These are identifiers, not
+# secrets — the client id travels in the browser's address bar on every sign-in — so they are
+# defaults here rather than in a tfvars file.  That is not cosmetic: terraform.tfvars is gitignored,
+# so anything that lives only there is absent in CI, and the first green deploy wiped both of these
+# off the Lambda and turned sign-in off on the live site.  Whatever CI needs belongs in a file CI
+# gets.  The client secret and the .pem are SecureStrings in SSM and are not Terraform's business
+# at all (api.tf).
 variable "github_client_id" {
   description = "GitHub App client id (Iv23li...).  Empty leaves sign-in off and the site read-only."
   type        = string
-  default     = ""
+  default     = "Iv23liOJniEBUs74yCMX"
 }
 
 variable "github_app_id" {
   description = "GitHub App numeric id.  Only needed to mint clone tokens for private repositories."
   type        = string
-  default     = ""
+  default     = "5064982"
 }
 
 variable "github_app_slug" {

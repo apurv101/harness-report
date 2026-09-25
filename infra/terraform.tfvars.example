@@ -1,21 +1,18 @@
-# Copy to terraform.tfvars.  Nothing secret belongs here — the client secret, the session secret and
-# the app's .pem are SecureStrings in Parameter Store, written by `./bootstrap.sh secrets`.
+# You do not need this file.  Every variable already defaults to the live stack's real value —
+# including the GitHub App's public identifiers — so `terraform apply` with no tfvars is correct,
+# and that is exactly what CI runs.
+#
+# Copy to terraform.tfvars only to point a checkout somewhere else (a second account, a staging
+# domain).  Anything you put here is invisible to CI, because terraform.tfvars is gitignored: if a
+# value needs to hold in a deploy, change the default in variables.tf instead.
+#
+# Nothing secret belongs here either way.  The client secret, the session secret and the app's .pem
+# are SecureStrings written by `./bootstrap.sh secrets` and are not managed by Terraform.
 
-region  = "us-west-2"
-domain  = "harnessreport.com"
-project = "harness-report"
-
-github_repo = "apurv101/harness-report"
-
-# The GitHub App's public half (github.com/apps/harness-report).  Leave the client id empty and the
-# site serves the runs read-only with sign-in switched off, which is a valid way to run it.
-github_client_id = ""
-github_app_id    = ""
-github_app_slug  = "harness-report"
-
-# The run store.  Must match HR_TABLE in .env, or the laptop and the site read different tables.
-table_name = "harness-report"
+# region  = "us-west-2"
+# domain  = "harnessreport.com"
+# project = "harness-report"
 
 # The EC2 runner fleet.  See runplane.tf: hr-agentd does not exist yet.
-enable_run_plane = false
-runner_warm_pool = 0
+# enable_run_plane = true
+# runner_warm_pool = 2
