@@ -36,14 +36,19 @@ data "aws_iam_policy_document" "deploy_assume" {
     }
 
     # main, and pull requests (plan only — the workflow, not the role, is what withholds apply).
+    #
+    # Each subject is listed once per naming form.  Never widen these to `repo:apurv101*/...`:
+    # the wildcard would also match `apurv10100`, which is a different account.
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        "repo:${var.github_repo}:ref:refs/heads/main",
-        "repo:${var.github_repo}:pull_request",
-        "repo:${var.github_repo}:environment:production",
-      ]
+      values = flatten([
+        for repo in compact([var.github_repo, var.github_repo_ids]) : [
+          "repo:${repo}:ref:refs/heads/main",
+          "repo:${repo}:pull_request",
+          "repo:${repo}:environment:production",
+        ]
+      ])
     }
   }
 }

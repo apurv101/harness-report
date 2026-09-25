@@ -22,6 +22,19 @@ variable "github_repo" {
   default     = "apurv101/harness-report"
 }
 
+variable "github_repo_ids" {
+  description = <<-EOT
+    The same repository written as GitHub's *immutable* OIDC subject: owner@<owner_id>/repo@<repo_id>.
+    GitHub now issues subject claims in this form so that renaming a repository — or someone else
+    later claiming the freed name — cannot silently satisfy a trust policy.  Both forms are trusted
+    because which one arrives depends on the account's setting, and AWS matches the literal string.
+    Read them from `gh api /repos/<owner>/<name> --jq '.owner.id, .id'`.  Empty trusts only the
+    classic form.
+  EOT
+  type        = string
+  default     = "apurv101@14235444/harness-report@1382886271"
+}
+
 variable "create_oidc_provider" {
   description = <<-EOT
     Create the GitHub OIDC provider.  One per account: leave it true for the first stack in an
