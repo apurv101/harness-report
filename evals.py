@@ -197,12 +197,20 @@ def start(repo, user=None, token=None, installation=None):
 
 
 def cancel_queued(eid):
-    """Ask the runner to stop.  The API cannot signal a process it did not start and cannot see, so it writes
-    the intent onto the record and hr-agentd, which re-reads it while the run goes, does the killing.  A lease
-    still waiting in the queue is dropped by the runner the moment it leases it."""
+    """Stop an evaluation this process is not running.
+
+    Two cases, and conflating them wedges the site.  A *running* one has a process on some runner, so all that
+    can be done here is write the intent: hr-agentd re-reads the record while it works and does the killing.
+    A *queued* one has no process to signal, so it is settled to cancelled outright — leaving it queued would
+    leave `running_eval()` returning it forever, and one-at-a-time would refuse every later run with a 409
+    naming a lease nobody is working on.  Its message stays on the queue and the runner drops it on sight."""
     ev = store.eval_record(eid)
     if not ev: return None
-    if ev.get("status") in ("queued", "running"):
+    if ev.get("status") == "queued":
+        ev.update(cancelled=True, status="cancelled", finished=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                  error="cancelled before it was leased")
+        store.publish_card(ev)
+    elif ev.get("status") == "running":
         ev["cancelled"] = True
         store.publish_card(ev)
     return ev
