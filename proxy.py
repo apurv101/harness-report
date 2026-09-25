@@ -54,7 +54,8 @@ def route_for(requested):
         if fnmatch.fnmatchcase(requested or "", pat): return tgt
 LOG = os.environ.get("LOG", "/out/calls.jsonl")
 PORT = int(os.environ.get("PORT", "4000"))
-brt = boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-west-2"))
+brt = (boto3.client("bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-west-2"))
+       if any(backend == "bedrock" for _, (backend, _) in ROUTES) else None)
 _lock = threading.Lock()
 _n = [0]
 OUTDIR = os.path.dirname(LOG) or "."

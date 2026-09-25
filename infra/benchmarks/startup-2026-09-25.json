@@ -1,0 +1,251 @@
+{
+  "date": "2026-09-25",
+  "region": "us-west-2",
+  "profile": "operator",
+  "vcpus": 8,
+  "memory_gib": 16,
+  "prepared_ami": "ami-07b3adfc7d225a1ea",
+  "analyzer_version": "2.1.282",
+  "method": "Wall time from provider API request to guest timestamp after Docker readiness and a small Python assertion in python:3.12-slim. Includes image loading; excludes app queue/ASG dispatch, repository analysis/build and model calls. EC2 has preinstalled tools and base images. CodeBuild uses the managed standard:7.0 image with local Docker-layer caching enabled.",
+  "limits": "One cold EC2 sample and two samples per other case. Not an SLA or p95. Custom CodeBuild images and hibernated EC2 have not been measured.",
+  "cases": {
+    "codebuild_docker_only": [
+      {
+        "platform": "codebuild",
+        "attempt": 1,
+        "status": "SUCCEEDED",
+        "phases": [
+          {
+            "type": "SUBMITTED",
+            "seconds": 0
+          },
+          {
+            "type": "QUEUED",
+            "seconds": 0
+          },
+          {
+            "type": "PROVISIONING",
+            "seconds": 7
+          },
+          {
+            "type": "DOWNLOAD_SOURCE",
+            "seconds": 0
+          },
+          {
+            "type": "INSTALL",
+            "seconds": 0
+          },
+          {
+            "type": "PRE_BUILD",
+            "seconds": 0
+          },
+          {
+            "type": "BUILD",
+            "seconds": 5
+          },
+          {
+            "type": "POST_BUILD",
+            "seconds": 0
+          },
+          {
+            "type": "UPLOAD_ARTIFACTS",
+            "seconds": 0
+          },
+          {
+            "type": "FINALIZING",
+            "seconds": 0
+          },
+          {
+            "type": "COMPLETED",
+            "seconds": null
+          }
+        ],
+        "docker_ready_seconds": 9.6,
+        "test_done_seconds": 14.57
+      },
+      {
+        "platform": "codebuild",
+        "attempt": 2,
+        "status": "SUCCEEDED",
+        "phases": [
+          {
+            "type": "SUBMITTED",
+            "seconds": 0
+          },
+          {
+            "type": "QUEUED",
+            "seconds": 0
+          },
+          {
+            "type": "PROVISIONING",
+            "seconds": 8
+          },
+          {
+            "type": "DOWNLOAD_SOURCE",
+            "seconds": 0
+          },
+          {
+            "type": "INSTALL",
+            "seconds": 0
+          },
+          {
+            "type": "PRE_BUILD",
+            "seconds": 0
+          },
+          {
+            "type": "BUILD",
+            "seconds": 4
+          },
+          {
+            "type": "POST_BUILD",
+            "seconds": 0
+          },
+          {
+            "type": "UPLOAD_ARTIFACTS",
+            "seconds": 0
+          },
+          {
+            "type": "FINALIZING",
+            "seconds": 0
+          },
+          {
+            "type": "COMPLETED",
+            "seconds": null
+          }
+        ],
+        "docker_ready_seconds": 10.339,
+        "test_done_seconds": 15.18
+      }
+    ],
+    "codebuild_install_worker_tools": [
+      {
+        "platform": "codebuild",
+        "attempt": 1,
+        "status": "SUCCEEDED",
+        "phases": [
+          {
+            "type": "SUBMITTED",
+            "seconds": 0
+          },
+          {
+            "type": "QUEUED",
+            "seconds": 0
+          },
+          {
+            "type": "PROVISIONING",
+            "seconds": 7
+          },
+          {
+            "type": "DOWNLOAD_SOURCE",
+            "seconds": 0
+          },
+          {
+            "type": "INSTALL",
+            "seconds": 0
+          },
+          {
+            "type": "PRE_BUILD",
+            "seconds": 0
+          },
+          {
+            "type": "BUILD",
+            "seconds": 44
+          },
+          {
+            "type": "POST_BUILD",
+            "seconds": 0
+          },
+          {
+            "type": "UPLOAD_ARTIFACTS",
+            "seconds": 0
+          },
+          {
+            "type": "FINALIZING",
+            "seconds": 0
+          },
+          {
+            "type": "COMPLETED",
+            "seconds": null
+          }
+        ],
+        "docker_ready_seconds": 9.845,
+        "tools_ready_seconds": 49.425,
+        "test_done_seconds": 54.502
+      },
+      {
+        "platform": "codebuild",
+        "attempt": 2,
+        "status": "SUCCEEDED",
+        "phases": [
+          {
+            "type": "SUBMITTED",
+            "seconds": 0
+          },
+          {
+            "type": "QUEUED",
+            "seconds": 0
+          },
+          {
+            "type": "PROVISIONING",
+            "seconds": 9
+          },
+          {
+            "type": "DOWNLOAD_SOURCE",
+            "seconds": 0
+          },
+          {
+            "type": "INSTALL",
+            "seconds": 0
+          },
+          {
+            "type": "PRE_BUILD",
+            "seconds": 0
+          },
+          {
+            "type": "BUILD",
+            "seconds": 48
+          },
+          {
+            "type": "POST_BUILD",
+            "seconds": 0
+          },
+          {
+            "type": "UPLOAD_ARTIFACTS",
+            "seconds": 0
+          },
+          {
+            "type": "FINALIZING",
+            "seconds": 0
+          },
+          {
+            "type": "COMPLETED",
+            "seconds": null
+          }
+        ],
+        "docker_ready_seconds": 11.592,
+        "tools_ready_seconds": 54.906,
+        "test_done_seconds": 59.816
+      }
+    ],
+    "prepared_ec2": [
+      {
+        "platform": "ec2-prepared-cold",
+        "attempt": 1,
+        "docker_ready_seconds": 63.218,
+        "test_done_seconds": 67.969
+      },
+      {
+        "platform": "ec2-stopped-resume",
+        "attempt": 2,
+        "docker_ready_seconds": 13.818,
+        "test_done_seconds": 14.3
+      },
+      {
+        "platform": "ec2-stopped-resume",
+        "attempt": 3,
+        "docker_ready_seconds": 13.215,
+        "test_done_seconds": 13.684
+      }
+    ]
+  }
+}

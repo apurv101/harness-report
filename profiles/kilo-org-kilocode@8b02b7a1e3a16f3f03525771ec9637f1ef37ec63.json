@@ -1,0 +1,30 @@
+{
+  "use_case": "A general-purpose AI coding agent you use from the terminal, VS Code or JetBrains to read a codebase, edit files across a project, run shell commands and tests, and plan or debug changes. It can also run unattended in CI with `kilo run --auto`.",
+  "domains": [
+    "swe"
+  ],
+  "languages": [
+    "javascript",
+    "python"
+  ],
+  "capabilities": [
+    "edits-files",
+    "runs-shell",
+    "runs-tests",
+    "browses-web",
+    "uses-git",
+    "multi-agent",
+    "long-horizon",
+    "reads-docs"
+  ],
+  "not_for": [
+    "Not tied to data/SQL, DevOps or other specialist domains: it has no dedicated tools for them beyond the shell and web fetch",
+    "Not a chat assistant for non-code work: its agents (Code, Plan, Ask, Debug) are all built around a code repository"
+  ],
+  "evidence": "README.md:24 and 112-134 describe an open-source coding agent for VS Code, JetBrains and the CLI, with Code, Plan, Ask and Debug agents, terminal and browser control, MCP support and `kilo run --auto` for CI. The tool definitions in packages/opencode/src/tool/ (read, write, edit, apply_patch, glob, grep, lsp, shell.ts, task, todowrite, webfetch, websearch, repo_clone, plan-enter/exit, skill) show it can edit files, run shell commands, spawn subagents and access the web. AGENTS.md describes the Agent Manager, which runs multiple sessions in git worktrees. I picked the languages from the repo's own TypeScript/JavaScript code and general usage; the tool prompts do not name specific languages.",
+  "source": "claude -p",
+  "commit": "8b02b7a1e3a16f3f03525771ec9637f1ef37ec63",
+  "seconds": 15,
+  "cost_usd": 0.13192399999999999,
+  "at": "2026-09-24T23:35:37"
+}

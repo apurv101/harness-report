@@ -1,0 +1,33 @@
+{
+  "use_case": "A self-hosted web control center where a developer starts and watches coding-agent conversations (OpenHands, or Claude Code/Codex/Gemini over ACP) that edit and run code in their project folders, and sets up scheduled or webhook-triggered automations (e.g. GitHub issue triage, Slack reports).",
+  "domains": [
+    "swe",
+    "enterprise-ops"
+  ],
+  "languages": [
+    "javascript",
+    "python"
+  ],
+  "capabilities": [
+    "edits-files",
+    "runs-shell",
+    "runs-tests",
+    "browses-web",
+    "uses-git",
+    "multi-agent",
+    "long-horizon",
+    "calls-apis",
+    "gui"
+  ],
+  "not_for": [
+    "This repo is only the React/TypeScript frontend (Agent Canvas); the agent loop, tool implementations and system prompts live in OpenHands/software-agent-sdk (Agent Server)",
+    "Not a headless or batch benchmark runner; you drive it through a browser UI backed by an Agent Server",
+    "No specialised data/SQL, science or document tooling beyond a general terminal, file editor and browser"
+  ],
+  "evidence": "In README.md (lines 7-46, 124-150), the project calls itself a \"self-hosted developer control center for coding agents and automations\" on top of the OpenHands Agent Server, with ACP agents and Slack/GitHub/Linear automations. In src/api/agent-server-adapter.ts, the default tools are terminal, file_editor and task_tracker (line 145). browser_tool_set and task_tool_set (sub-agents) can be turned on (lines 146-147, 739-766), and a max_iterations default of 500 is set (line 150). Planning agents use glob, grep, a plan file editor and system_prompt_planning.j2 with a condenser (lines 1430-1459). AGENTS.md says the agent/tools/prompts are owned by software-agent-sdk.",
+  "source": "claude -p",
+  "commit": "5ddcd7276ca869ebf4e3e7f9e98bd36080c6b9c2",
+  "seconds": 25,
+  "cost_usd": 0.180852,
+  "at": "2026-09-24T23:31:50"
+}

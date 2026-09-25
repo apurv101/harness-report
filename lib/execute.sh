@@ -31,7 +31,7 @@ run_one() {
   stage run "$TASKNAME  cwd=$WORKDIR  timeout=${AGENT_T}s  $RUN_CMD"
   CUR_RUN="hr-run-$RUN"; docker rm -f "$CUR_RUN" >/dev/null 2>&1 || true
   local LOGS_MOUNT=(); [ -z "$TDIR" ] || LOGS_MOUNT=(-v "$OUT:/logs")   # Harbor: /logs/agent, /logs/verifier/reward.txt
-  docker run -d --platform "$PLATFORM" --name "$CUR_RUN" --network "$HNET" -w "$WORKDIR" ${RES_ARGS[@]+"${RES_ARGS[@]}"} \
+  docker run -d ${JOB_LABEL[@]+"${JOB_LABEL[@]}"} --platform "$PLATFORM" --name "$CUR_RUN" --network "$HNET" -w "$WORKDIR" ${RES_ARGS[@]+"${RES_ARGS[@]}"} \
     -v "$OUT:/out" ${LOGS_MOUNT[@]+"${LOGS_MOUNT[@]}"} -v "$INSTR:/task/instruction.md:ro" -v "$WRAPPER:/usr/local/bin/run-harness:ro" \
     -e "PROXY_URL=$PROXY_URL" -e "HR_PATH=$(image_path "$OTAG")" -e TEST_DIR=/tests ${HENV[@]+"${HENV[@]}"} ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} "$OTAG" sleep infinity >/dev/null
   local START; START=$(date +%s); set +e
@@ -48,7 +48,7 @@ run_one() {
     # phase's proxy settings.  Left in, HTTP_PROXY turns a test's own network assertions into the proxy's answers
     # — swebench psf__requests-5414 failed 15 PASS_TO_PASS tests that way (ConnectionError became a 502) for three
     # harnesses whose fix was correct.  So verify-phase traffic is not in egress.jsonl.
-    [ "$EGRESS" = open ] || docker network connect hr-net "$CUR_RUN" 2>/dev/null || true
+    [ "$EGRESS" = open ] || docker network connect "$NET" "$CUR_RUN" 2>/dev/null || true
     local UNSET=(); for v in "${HENV[@]+"${HENV[@]}"}"; do case "$v" in -e) ;; *) UNSET+=(-u "${v%%=*}") ;; esac; done
     docker cp "$TDIR/tests/." "$CUR_RUN:/tests/"
     set +e

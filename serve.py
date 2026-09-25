@@ -48,6 +48,7 @@ Every run is one folder runs/<run-id>/; its run.json says what harness (harness.
 (kind prompt|harbor, task.name/taskset, prompt) and what model it ran, plus rc/seconds/reward/calls once finished.
 """
 import argparse, json, os, sys
+from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import quote, unquote, parse_qs, urlsplit
 
@@ -56,7 +57,7 @@ import auth, ddb, evals, leases, mcp, pages, recommend, store, verifier
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.abspath(os.path.join(HERE, "web", "dist"))     # the built frontend
-RUNS = os.path.abspath(os.path.join(HERE, "runs"))
+RUNS = evals.RUNS
 
 TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
          ".css": "text/css; charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml",
@@ -171,6 +172,14 @@ class H(SimpleHTTPRequestHandler):
 
     def auth_route(self, parts, q):
         """The OAuth dance.  The browser only ever holds a signed session id; tokens stay in auth.SESSIONS."""
+        if evals.LOCAL_USERS:
+            if parts == ["local"]:
+                user = (q.get("user") or [""])[0]
+                if user not in ("alice", "bob", "charlie"):
+                    return self.json(400, {"error": "choose alice, bob or charlie"})
+                return self.redirect("/import", f"hr_local_user={user}; Path=/; HttpOnly; SameSite=Lax")
+            if parts == ["logout"]:
+                return self.redirect("/", "hr_local_user=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
         if not auth.configured(): return self.json(404, {"error": "github sign-in is not configured"})
         if parts == ["github"]:
             state, cookie = auth.state_cookie()
@@ -209,6 +218,21 @@ class H(SimpleHTTPRequestHandler):
         except RuntimeError as e: return self.json(502, {"error": str(e)})
         return self.json(404, {"error": "no such api route"})
 
+    def session(self):
+        if evals.LOCAL_USERS:
+            cookie = SimpleCookie()
+            try: cookie.load(self.headers.get("Cookie") or "")
+            except Exception: return None
+            user = cookie.get("hr_local_user")
+            return {"login": user.value, "local": True} if user and user.value in ("alice", "bob", "charlie") else None
+        return auth.session_of(self.headers.get("Cookie")) if auth.configured() else None
+
+    def owns_eval(self, ev):
+        if not (evals.LOCAL_QUEUED or evals.QUEUED): return True
+        sess = self.session()
+        user = (sess or {}).get("login") or "local"
+        return ev.get("user") == user
+
     def eval_state(self, ev, after):
         """What the site polls: the evaluation, run.sh's events from `after` on, the live calls, and the run's
         summary (reward, tests, calls) once it has finished.
@@ -220,26 +244,36 @@ class H(SimpleHTTPRequestHandler):
         result = None
         if finished:
             result = summary(ev["run"]) if find_run(ev["run"]) else from_table(store.run_card, ev["run"])
-        return {"eval": {k: v for k, v in ev.items() if k != "pid"}, "events": evs, "next": nxt,
+        return {"eval": {k: v for k, v in ev.items() if k not in ("pid", "installation", "claim", "revision", "cap_counted", "lease_until")}, "events": evs, "next": nxt,
                 "live": evals.live(ev), "result": result}
 
     def eval_console(self, eid, q):
         """The evaluation's console log: JSON with a byte cursor for the live view, or text/plain to open it whole."""
         ev = evals.get(eid)
         if not ev: return self.json(404, {"error": "no such evaluation"})
+        if not self.owns_eval(ev): return self.json(403, {"error": "this evaluation belongs to another user"})
         out = evals.console(eid, int((q.get("after") or ["0"])[0] or 0))
         if (q.get("format") or [""])[0] == "text":
             return self.send(200, evals.console(eid, 0)["text"], "text/plain; charset=utf-8")
         return self.json(200, {**out, "status": ev["status"]})
 
     def evals_get(self, parts, q):
+        if (evals.LOCAL_QUEUED or evals.QUEUED) and parts == []:
+            user = (self.session() or {}).get("login") or "local"
+            if evals.QUEUED:
+                import cloudqueue
+                rows = cloudqueue.recent(user)
+            else: rows = evals.local_queue().recent(user)
+            return self.json(200, {"evals": [{k: v for k, v in e.items() if k not in ("pid", "installation", "claim", "revision", "cap_counted", "lease_until")}
+                                          for e in rows]})
         if parts == ["current"]:
-            ev = evals.current()
+            ev = evals.current((self.session() or {}).get("login"), (q.get("repo") or [None])[0])
             return self.json(200, self.eval_state(ev, 0) if ev else None)
         if len(parts) == 2 and parts[1] == "console": return self.eval_console(parts[0], q)
         if len(parts) == 1:
             ev = evals.get(parts[0])
             if not ev: return self.json(404, {"error": "no such evaluation"})
+            if not self.owns_eval(ev): return self.json(403, {"error": "this evaluation belongs to another user"})
             try: after = max(0, int((q.get("after") or ["0"])[0]))
             except ValueError: after = 0
             return self.json(200, self.eval_state(ev, after))
@@ -248,7 +282,7 @@ class H(SimpleHTTPRequestHandler):
     def installation_of(self, sess, repo):
         """Which of the signed-in user's installations grants this repository, and whether it is private.
         (None, False) when nothing does — a public repo is cloned anonymously and needs neither."""
-        if not sess or not auth.can_clone(): return None, False
+        if not sess or sess.get("local") or not auth.can_clone(): return None, False
         for inst in auth.installations(sess):
             for r in auth.repositories(sess, inst["id"]):
                 if r["name"].lower() == repo.lower():
@@ -280,8 +314,8 @@ class H(SimpleHTTPRequestHandler):
         origin = self.headers.get("Origin")
         if origin and urlsplit(origin).netloc != self.headers.get("Host"): return self.json(403, {"error": "cross-origin request"})
         if not (self.headers.get("Content-Type") or "").startswith("application/json"): return self.json(415, {"error": "send JSON"})
-        sess = auth.session_of(self.headers.get("Cookie")) if auth.configured() else None
-        if auth.configured() and not sess: return self.json(401, {"error": "sign in with github"})
+        sess = self.session()
+        if (auth.configured() or evals.LOCAL_USERS or evals.QUEUED) and not sess: return self.json(401, {"error": "sign in to start an evaluation"})
         try: body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
         except ValueError: return self.json(400, {"error": "bad json"})
         if parts[2:] == []:
@@ -291,17 +325,20 @@ class H(SimpleHTTPRequestHandler):
             # here needs one now.  Either way the token never travels through the queue.
             try:
                 inst, private = self.installation_of(sess, repo)
-                token = None if evals.QUEUED else (auth.clone_token(inst)[0] if (inst and private) else None)
+                token = None if (evals.QUEUED or evals.LOCAL_QUEUED) else (auth.clone_token(inst)[0] if (inst and private) else None)
             except RuntimeError as e: return self.json(502, {"error": f"could not reach GitHub: {e}"})
             taskset, task = (str(body.get(k) or "").strip() or None for k in ("taskset", "task"))
-            try: ev = evals.start(repo, user=(auth.public(sess) or {}).get("login"), token=token,
+            try: ev = evals.start(repo, user=(sess or {}).get("login"), token=token,
                                   installation=inst if private else None, taskset=taskset, task=task)
             except evals.Refused as r:
                 return self.json(429 if "limit" in str(r) else 400, {"error": str(r)})
             except evals.Busy as b: return self.json(409, {"error": f"{b.eval['repo']} is already running; one evaluation at a time", "eval": b.eval["id"]})
             except leases.Error as e: return self.json(503, {"error": f"the run queue is not reachable: {e}"})
+            except ddb.Error as e: return self.json(503, {"error": f"the job store is not reachable: {e}"})
             return self.json(201, self.eval_state(ev, 0))
         if len(parts) == 4 and parts[3] == "cancel":
+            ev = evals.get(parts[2])
+            if ev and not self.owns_eval(ev): return self.json(403, {"error": "this evaluation belongs to another user"})
             ev = evals.cancel(parts[2])
             return self.json(200, {"eval": ev["id"], "cancelled": bool(ev.get("cancelled"))}) if ev else self.json(404, {"error": "no such evaluation"})
         return self.json(404, {"error": "no such api route"})
@@ -331,10 +368,13 @@ class H(SimpleHTTPRequestHandler):
         parts = [unquote(p) for p in path.strip("/").split("/") if p]
         q = parse_qs(query)
         if parts[:1] == ["auth"]: return self.auth_route(parts[1:], q)
-        sess = auth.session_of(self.headers.get("Cookie")) if auth.configured() else None
+        sess = self.session()
         if parts[:1] == ["api"]:
-            if parts[1:] == ["me"]: return self.json(200, {"auth": auth.configured(), "user": auth.public(sess),
-                                                            "install_url": "/auth/install" if auth.install_url() else "", "can_clone": auth.can_clone()})
+            if parts[1:] == ["me"]: return self.json(200, {"auth": auth.configured() or evals.LOCAL_USERS,
+                                                            "local_users": evals.LOCAL_USERS, "eval_mode": evals.MODE,
+                                                            "user": {"login": sess["login"], "id": 0, "avatar": "", "name": sess["login"]} if sess and sess.get("local") else auth.public(sess),
+                                                            "install_url": "/auth/install" if not evals.LOCAL_USERS and auth.install_url() else "",
+                                                            "can_clone": not evals.LOCAL_USERS and auth.can_clone()})
             if parts[1:] == ["runs"]:
                 return self.json(200, from_table(store.runs_list) or [summary(r) for r in run_dirs()])
             if parts[1:2] == ["run"] and len(parts) == 4 and parts[3] == "files":
@@ -352,6 +392,7 @@ class H(SimpleHTTPRequestHandler):
                 return self.json(200, bundle(d)) if d else self.json(404, {"error": "no such run"})
             if parts[1:2] == ["github"]:
                 if not sess: return self.json(401, {"error": "sign in with github"})
+                if sess.get("local"): return self.json(200, [])
                 return self.github_route(parts[2:], q, sess)
             if parts[1:2] == ["evals"]: return self.evals_get(parts[2:], q)
             if parts[1:] == ["runnable"]: return self.entity(lambda: pages.runnable())
@@ -408,7 +449,7 @@ if __name__ == "__main__":
     a = ap.parse_args(); RUNS = os.path.abspath(a.runs); DIST = os.path.abspath(a.dist); STORE = a.store
     if not os.path.isfile(os.path.join(DIST, "index.html")):
         print(f"warning: no index.html in {DIST} — run: npm --prefix web install && npm --prefix web run build", file=sys.stderr)
-    mode = f"github sign-in as {auth.CLIENT_ID} ({auth.BASE_URL})" if auth.configured() else "open (no GITHUB_CLIENT_ID)"
+    mode = "local test users (alice, bob, charlie)" if evals.LOCAL_USERS else f"github sign-in as {auth.CLIENT_ID} ({auth.BASE_URL})" if auth.configured() else "open (no GITHUB_CLIENT_ID)"
     src = "the run folders" if STORE == "files" else f"{ddb.target()}" + ("" if store.available() else " — NOT answering, reading the run folders")
     print(f"Harness Report on http://localhost:{a.port}   runs={RUNS}   auth={mode}\n  runs from: {src}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", a.port), H).serve_forever()

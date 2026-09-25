@@ -5,17 +5,18 @@ import { Icon } from '../ui/Icon'
  * The stages of a run: done, running, or still queued.  The preview walks its four simulated stages; a real run
  * passes its own, with a line of detail under each (the commit, the Docker setup, the live model calls, the tests).
  */
-export function CheckStages({ completed, stages = STAGES, details, failed = false }: {
+export function CheckStages({ completed, stages = STAGES, details, failed = false, waiting = false }: {
   completed: number
   stages?: readonly (readonly [string, string])[]
   details?: (string | null)[]
   failed?: boolean
+  waiting?: boolean
 }) {
   return (
     <div className="check-status">
       {stages.map(([title, desc], i) => {
         const done = i < completed
-        const active = i === completed
+        const active = !waiting && i === completed
         const stopped = active && failed
         return (
           <div key={title} className={`check-stage ${done ? 'done' : active ? 'active' : ''}`}>

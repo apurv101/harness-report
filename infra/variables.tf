@@ -112,27 +112,67 @@ variable "price_class" {
 
 variable "enable_run_plane" {
   description = <<-EOT
-    Turn on the EC2 runner fleet from RUN-PLANE.md: SQS, the launch template and a warm pool.
-    Off by default because hr-agentd — the daemon that leases from the queue and calls run.sh —
-    does not exist yet, so a fleet turned on now is a bill with nothing to do.
+    Provision demand-driven workers and their release/task bucket. Enable runner_dispatch_enabled
+    after uploading tasks and migrating legacy jobs. Each VM runs one evaluation and retires.
   EOT
   type        = bool
   default     = false
 }
 
 variable "runner_instance_type" {
-  description = "x86 with instance-store NVMe: the Harbor corpus is amd64 and image unpack is disk-bound."
+  description = "x86 evaluation host; Docker caches use EBS so a stopped warm worker retains them."
   type        = string
-  default     = "c6id.2xlarge"
+  default     = "c6i.2xlarge"
 }
 
 variable "runner_warm_pool" {
-  description = "Instances kept booted and tagged hr:state=free.  RUN-PLANE.md measures 2 at 10 runs/hour."
+  description = "Unused stopped workers to maintain and replenish in the background. Zero disables standby; idle workers never stay running."
   type        = number
-  default     = 0
+  default     = 2
 }
 
 variable "runner_max_size" {
-  type    = number
-  default = 4
+  description = "Maximum simultaneous evaluation VMs; demand determines the actual running capacity."
+  type        = number
+  default     = 4
+}
+
+variable "runner_dispatch_enabled" {
+  description = "Accept automatic fleet wakeups after tasks and migration are ready. Disabled also disables standby preparation."
+  type        = bool
+  default     = false
+}
+
+variable "runner_ami_id" {
+  description = "Prepared Ubuntu AMI built with infra/runner-image.pkr.hcl in this account/us-west-2. Override for another account/region; empty installs dependencies during first warm-up."
+  type        = string
+  default     = "ami-07b3adfc7d225a1ea"
+}
+
+variable "runner_disk_gb" {
+  description = "Encrypted EBS root including reusable Docker layers, preserved while an unused worker is stopped."
+  type        = number
+  default     = 200
+}
+
+variable "runner_model" {
+  description = "Default Bedrock route for the evaluation proxy."
+  type        = string
+  default     = "bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0"
+}
+
+variable "runner_analyzer_model" {
+  description = "Bedrock inference profile used by the Claude CLI for uncached recipes."
+  type        = string
+  default     = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+}
+
+variable "runner_max_job_seconds" {
+  description = "Maximum time for one evaluation, including preparation and verification."
+  type        = number
+  default     = 7200
+  validation {
+    condition     = var.runner_max_job_seconds >= 60 && var.runner_max_job_seconds <= 39600
+    error_message = "Job time must be between 60 seconds and 11 hours (below SQS's 12-hour visibility ceiling)."
+  }
 }

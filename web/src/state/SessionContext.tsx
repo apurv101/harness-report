@@ -15,7 +15,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [served, setServed] = useState<boolean | null>(null)
   useEffect(() => {
     const ac = new AbortController()
-    getSession(ac.signal).then(me => { setServed(true); if (me.auth) setSession(me) }).catch(() => { if (!ac.signal.aborted) setServed(false) /* static site: stay in preview */ })
+    getSession(ac.signal).then(me => { setServed(true); setSession(me) }).catch(() => { if (!ac.signal.aborted) setServed(false) /* static site: stay in preview */ })
     return () => ac.abort()
   }, [])
   return (

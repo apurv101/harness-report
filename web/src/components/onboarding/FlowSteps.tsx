@@ -1,4 +1,5 @@
 import { Icon } from '../ui/Icon'
+import { useSession } from '../../state/SessionContext'
 
 const STEPS = [
   ['Sign in', 'Connect with GitHub'],
@@ -8,6 +9,7 @@ const STEPS = [
 
 /** Where you are in the three-step flow.  Step 4 means finished, so all three read complete. */
 export function FlowSteps({ step }: { step: number }) {
+  const localUsers = useSession()?.local_users
   return (
     <ol className="flow-steps">
       {STEPS.map(([title, detail], i) => {
@@ -16,7 +18,7 @@ export function FlowSteps({ step }: { step: number }) {
         return (
           <li key={title} className={done ? 'complete' : current ? 'current' : ''} aria-current={current ? 'step' : undefined}>
             <span className="flow-step-circle">{done ? <Icon name="check" /> : i + 1}</span>
-            <div className="flow-step-text"><strong>{title}</strong><span>{detail}</span></div>
+            <div className="flow-step-text"><strong>{title}</strong><span>{i === 0 && localUsers ? 'Choose a local test user' : detail}</span></div>
           </li>
         )
       })}

@@ -13,7 +13,7 @@ and say how it differs from the last one.
 and the message goes back to the analyzer as its feedback.  `ok` is the gate on a stored recipe: an older one,
 written before the overlay rule, fails it and is re-analyzed.
 """
-import difflib, hashlib, json, re, sys
+import difflib, hashlib, json, os, re, sys, tempfile
 
 FIELDS = ("base_image", "dockerfile", "run_command", "check_command", "env", "api_style")
 
@@ -74,5 +74,12 @@ def diff(args):
     print(f"recipe vs previous: {'changed: ' + ', '.join(p.split(chr(10))[0].split('/')[-1] for p in parts) if parts else 'unchanged'}")
 
 
+def cache(args):
+    source, destination = args
+    with tempfile.NamedTemporaryFile(dir=os.path.dirname(destination), delete=False) as f:
+        f.write(open(source, "rb").read())
+    os.replace(f.name, destination)
+
+
 if __name__ == "__main__":
-    {"save": save, "field": field, "ok": ok, "hash": digest, "env": env, "diff": diff}[sys.argv[1]](sys.argv[2:])
+    {"save": save, "field": field, "ok": ok, "hash": digest, "env": env, "diff": diff, "cache": cache}[sys.argv[1]](sys.argv[2:])

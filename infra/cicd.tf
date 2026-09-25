@@ -75,7 +75,7 @@ resource "aws_iam_role_policy" "deploy" {
         Effect = "Allow"
         Action = [
           "s3:*", "cloudfront:*", "lambda:*", "dynamodb:*", "ecr:*", "sqs:*",
-          "acm:*", "route53:*", "logs:*", "ssm:*", "autoscaling:*", "ec2:*",
+          "acm:*", "route53:*", "logs:*", "ssm:*", "autoscaling:*", "ec2:*", "events:*",
           "iam:GetRole", "iam:PassRole", "iam:CreateRole", "iam:DeleteRole", "iam:TagRole",
           "iam:GetRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
           "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:ListInstanceProfilesForRole",

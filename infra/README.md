@@ -54,7 +54,7 @@ Three things differ from the laptop, all of them environment:
 | variable | why |
 |---|---|
 | `HR_SESSIONS=ddb` | sessions are rows, not `.auth/sessions.json`. Lambda has no disk to share between instances, and the package directory is read-only anyway |
-| `HR_EVALS=off` | `POST /api/evals` starts `run.sh`, which needs a Docker daemon. It answers 503 until the run plane exists |
+| `HR_EVALS=queue` | accepts jobs into SQS FIFO; EC2 workers own Docker |
 | `HR_PUBLIC_HOST` | CloudFront cannot forward the viewer's `Host` to a function URL origin, so it is configured — and the edge function collapses www into the apex so one configured value is right for every request |
 
 `/raw/<run-id>/<file>` is answered by the Lambda out of the text the store inlines into each row, so
@@ -113,16 +113,19 @@ page that points at bundles the bucket does not have yet.
 
 ## The run plane
 
-`runplane.tf` is RUN-PLANE.md — the lease queue, the runner's IAM, the launch template with the boot
-sequence from that document (NVMe formatted and mounted at `/var/lib/docker`, the eight bake-list
-bases pulled in parallel, BuildKit warmed, then and only then `hr:state=free`), and an ASG.
+The worker now runs the same isolated Docker pipeline as the local pool. SQS FIFO
+serializes jobs per GitHub user and permits different users in parallel. DynamoDB
+transactions own job state; the API no longer rejects every submission while one
+job is active. A Lambda controller wakes EC2 capacity on submission and returns it
+to zero afterward. `runner_max_size` bounds parallel evaluations; `runner_warm_pool`
+sets the number of unused, stopped standby workers.
 
-`enable_run_plane` is **false**, for one honest reason: `hr-agentd` — the poller that leases from the
-queue, runs `run.sh`'s stages and syncs the folder to S3 — is not written. Turn the flag on today and
-you get instances that boot, warm their caches, advertise themselves and idle.
-
-What is *not* gated, because it is correct now and free at rest: the runs and recipes buckets, both
-ECR repositories, and the table. `hr-agentd` will need all four the day it exists.
+See [CLOUD.md](../CLOUD.md) for architecture, operator-profile deployment commands,
+task upload, migration from the retained standard queue and integration tests.
+Provision the assets with dispatch disabled, upload the task corpus, then enable
+`runner_dispatch_enabled`. The fleet remains opt-in through `enable_run_plane`.
+`runner-image.pkr.hcl` builds the prepared AMI; `scaler.tf` owns demand dispatch and
+reconciliation. Stopped workers retain Docker layers on encrypted EBS.
 
 ## Pulling it down
 
@@ -135,8 +138,7 @@ What goes: everything else, including the runs and recipes buckets, but only whe
 `allow_data_destroy=true` is passed. An ordinary apply cannot make those two disposable, which is
 why the flag exists and why it is not in `terraform.tfvars.example`.
 
-The DynamoDB table is a derived index: `./run.sh ddb sync` rebuilds every row from the run folders.
-Losing it costs one command. The buckets are the only thing here that is not reproducible from the
+The DynamoDB table now also holds authoritative cloud jobs and daily limits, alongside the derived report index. Back up this state; syncing run folders does not recreate pending jobs. The buckets are the only thing here that is not reproducible from the
 repo.
 
 ## Costs

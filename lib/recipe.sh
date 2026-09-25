@@ -48,7 +48,7 @@ write_wrapper() {
 }
 check_image() {  # $1 = image: run the recipe's check command inside it, no network
   local chk; chk="$(recipe_field check_command)"
-  docker run --rm --platform "$PLATFORM" --network none -e "HR_PATH=$(image_path "$1")" "$1" bash -lc "$PRELUDE$chk" > "$WORK/check.log" 2>&1 \
+  docker run --rm ${JOB_LABEL[@]+"${JOB_LABEL[@]}"} --platform "$PLATFORM" --network none -e "HR_PATH=$(image_path "$1")" "$1" bash -lc "$PRELUDE$chk" > "$WORK/check.log" 2>&1 \
     || { echo "check command failed in $1: $chk"; tail -40 "$WORK/check.log"; return 1; }
 }
 recipe_hash() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest()[:16])' "$RECIPE"; }
@@ -59,7 +59,7 @@ build_overlay() {  # $1 = base image, $2 = tag, $3 = force(0/1): docker build th
   local rh; rh="$(recipe_hash)"
   if [ "$3" = 0 ] && [ "$(image_platform "$2")" = "$PLATFORM" ] && [ "$(image_label "$2" hr.commit)" = "$COMMIT" ] \
      && [ "$(image_label "$2" hr.recipe)" = "$rh" ]; then echo "overlay $2 exists (${COMMIT:0:7}, recipe $rh, $PLATFORM)"; BUILT="$BUILT$2 "; return 0; fi
-  docker build -q --platform "$PLATFORM" --label hr.commit="$COMMIT" --label hr.recipe="$rh" \
+  docker build -q ${JOB_LABEL[@]+"${JOB_LABEL[@]}"} --platform "$PLATFORM" --label hr.commit="$COMMIT" --label hr.recipe="$rh" \
     --build-arg BASE="$1" -t "$2" -f "$WORK/Dockerfile" "$SRC" > "$WORK/build.log" 2>&1 \
     || { echo "docker build FROM $1 failed:"; tail -40 "$WORK/build.log"; return 1; }
   echo "overlay $2 built FROM $1"
@@ -73,7 +73,7 @@ overlay_tag() { echo "$IMAGE/$TS_NAME:$1"; }
 # analyzed, seeded with the newest working recipe for this repo; --rebuild analyzes from scratch.
 # PREV is what the final recipe is diffed against (recipe.diff), so a changed result can be traced to a changed Docker setup.
 prepare_recipe() {
-  STORE="$HERE/recipes"; STORED="$STORE/$NAME@$COMMIT.json"; mkdir -p "$STORE"
+  STORE="${HR_RECIPE_DIR:-$HERE/recipes}"; STORED="$STORE/$NAME@$COMMIT.json"; mkdir -p "$STORE"
   SEED=""; SEED_COMMIT=""; PREV=""; NEED_ANALYZE=0; FORCE=0
   if [ "$REBUILD" = 0 ] && [ -f "$STORED" ]; then
     cp "$STORED" "$RECIPE"; cp "$STORED" "$WORK/prev.recipe.json"; PREV="$WORK/prev.recipe.json"
@@ -107,7 +107,7 @@ prepare_recipe() {
   done
   [ "$OK" = 1 ] || die "could not build a working sandbox after 3 attempts; see work/$NAME/{build.log,check.log,analyze.stderr}"
   # the recipe built and passed its check: keep it for this commit, and say how it differs from the one before it
-  [ "$FORCE" = 1 ] && { cp "$RECIPE" "$STORED"; echo "recipe saved: recipes/$(basename "$STORED")"; store recipe "$STORED"; }
+  [ "$FORCE" = 1 ] && { python3 "$HERE/lib/recipe.py" cache "$RECIPE" "$STORED"; echo "recipe saved: recipes/$(basename "$STORED")"; store recipe "$STORED"; }
   emit type built image "$IMAGE" platform "$PLATFORM"
   rm -f "$WORK/recipe.diff"
   if [ -n "$PREV" ]; then python3 "$HERE/lib/recipe.py" diff "$PREV" "$RECIPE" "$WORK/recipe.diff"; fi

@@ -13,6 +13,8 @@
 # domain  = "harnessreport.com"
 # project = "harness-report"
 
-# The EC2 runner fleet.  See runplane.tf: hr-agentd does not exist yet.
+# The EC2 runner fleet. See CLOUD.md: upload tasks and migrate the old queue before starting it.
 # enable_run_plane = true
-# runner_warm_pool = 2
+# runner_dispatch_enabled = true
+# runner_warm_pool = 2  # stopped standby, not running idle workers
+# runner_ami_id = "ami-..."  # prepared with runner-image.pkr.hcl

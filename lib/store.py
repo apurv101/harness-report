@@ -39,8 +39,8 @@ from $HARBOR_TASKS on the runner's disk, because the site has no disk to read it
 
 Three rules, all inherited from the sibling repo's store and all load-bearing:
 
-* **No UpdateItem.** Every row is re-put whole.  One writer owns a partition (the run that is producing it), so
-  there is nothing to merge, and the IAM a real deployment needs stays Query/GetItem/PutItem/BatchWriteItem.
+* **Report rows are re-put whole.** One run owns its report partition. Authoritative cloud job state
+  and daily quotas live separately in cloudqueue.py and use conditional transactions.
 * **The index row carries the whole card.**  The runs page renders from one Query, not 67 GetItems.
 * **Sequence sort keys are zero-padded to 10 digits**, and `META`/`MANIFEST`/`TESTS` sort outside those ranges, so
   a `begins_with(sk, "CALL#")` can never sweep up the metadata.
@@ -68,9 +68,10 @@ sys.path.insert(0, HERE)
 import ddb, verifier                                                   # noqa: E402
 
 ROOT = os.path.dirname(HERE)
-RUNS = os.path.join(ROOT, "runs")
-RECIPES = os.path.join(ROOT, "recipes")
-EVALS = os.path.join(ROOT, "evals")
+DATA = os.path.abspath(os.environ.get("HR_DATA_DIR") or ROOT)
+RUNS = os.path.join(DATA, "runs")
+RECIPES = os.environ.get("HR_RECIPE_DIR") or os.path.join(ROOT, "recipes")
+EVALS = os.path.join(DATA, "evals")
 
 GSI, TASK_GSI = "harness", "task"
 RUNLIST, RECIPELIST, EVALLIST = "RUNLIST", "RECIPELIST", "EVALLIST"
@@ -606,7 +607,7 @@ def eval_events(eid, after=0):
 
 
 def running_eval():
-    """The evaluation the fleet is working on now, if any.  One at a time is enforced on the way in."""
+    """Legacy report lookup. Cloud scheduling uses cloudqueue.py's authoritative job rows."""
     for card in evals_list(limit=25):
         if card.get("status") in ("queued", "running"): return card
     return None
@@ -670,10 +671,10 @@ def file_text(rid, name):
 # ------------------------------------------------------------------ CLI
 def cmd_sync(a):
     what = [w for w in ("runs", "recipes", "evals", "tasks", "harnesses") if getattr(a, w)] or ["runs", "recipes", "evals", "harnesses"]
+    n = items = 0
     if "tasks" in what:
         k, rows = publish_tasks(a.grep, a.quiet)
         n += k; items += rows
-    n = items = 0
     if "runs" in what:
         for rid in sorted(os.listdir(RUNS) if os.path.isdir(RUNS) else []):
             d = os.path.join(RUNS, rid)
@@ -761,4 +762,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if os.environ.get("HR_EVALS") == "local-queue":
+        import fcntl
+        os.makedirs(EVALS, exist_ok=True)
+        # Serialise derived harness/task summaries when independent jobs publish together.
+        with open(os.path.join(EVALS, ".publish.lock"), "a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            main()
+    else:
+        main()

@@ -12,7 +12,7 @@ export function AccountBar() {
         {user?.avatar ? <img src={user.avatar} alt="" width={26} height={26} /> : <Icon name="github" />}
       </span>
       <span className="account-name">
-        {user ? user.login : 'your-workspace'} <span>{user ? 'GitHub account' : 'Sample GitHub account'}</span>
+        {user ? user.login : 'your-workspace'} <span>{session?.local_users ? 'Local test user' : user ? 'GitHub account' : 'Sample GitHub account'}</span>
       </span>
       {user
         ? <a className="text-link" href="/auth/logout">Sign out</a>

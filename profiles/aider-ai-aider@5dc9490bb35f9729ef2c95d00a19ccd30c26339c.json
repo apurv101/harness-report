@@ -1,0 +1,37 @@
+{
+  "use_case": "A terminal pair-programming assistant: you add files from your git repo to the chat, describe a change or bug fix, and the LLM edits the code with SEARCH/REPLACE diffs, auto-commits the change, and can re-run your linter/tests to fix failures.",
+  "domains": [
+    "swe"
+  ],
+  "languages": [
+    "cpp",
+    "css",
+    "go",
+    "html",
+    "java",
+    "javascript",
+    "php",
+    "python",
+    "ruby",
+    "rust"
+  ],
+  "capabilities": [
+    "edits-files",
+    "runs-shell",
+    "runs-tests",
+    "uses-git",
+    "browses-web",
+    "reads-docs"
+  ],
+  "not_for": [
+    "The model does not call tools on its own. Edits come back as text blocks, and shell commands are only suggested; the user confirms before they run",
+    "Not a long-horizon agent that plans and explores by itself: the user has to add the relevant files to the chat",
+    "Not built for data/SQL, ops/infra, or non-coding work"
+  ],
+  "evidence": "README.md calls it \"AI Pair Programming in Your Terminal\" and lists repo map, git auto-commit, lint and test, web pages/images, and 100+ languages. aider/coders/editblock_prompts.py:8-29 sets the SEARCH/REPLACE edit protocol and says to ask the user to add files. aider/commands.py has cmd_web (219), cmd_commit (337), cmd_lint (356), cmd_undo (553), cmd_git (967), cmd_test (993) and cmd_run (1013).",
+  "source": "claude -p",
+  "commit": "5dc9490bb35f9729ef2c95d00a19ccd30c26339c",
+  "seconds": 14,
+  "cost_usd": 0.0870634,
+  "at": "2026-09-24T23:30:49"
+}

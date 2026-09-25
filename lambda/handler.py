@@ -12,8 +12,8 @@ Three things differ from the laptop and all three are environment, not code:
 
     HR_SESSIONS=ddb    sessions are rows in the run store; Lambda has no disk to share between
                        instances, and .auth/sessions.json would be read-only anyway
-    HR_EVALS=off       POST /api/evals starts run.sh, which needs a Docker daemon.  It comes back
-                       with the run plane (RUN-PLANE.md); until then it answers 503, not a traceback
+    HR_EVALS=queue     POST /api/evals records a durable job and sends it to SQS FIFO;
+                       workers with Docker execute it and publish progress
     HR_PUBLIC_HOST     CloudFront cannot forward the viewer's Host header to a function url origin,
                        so the host is configured.  The edge function 301s www to the apex, which is
                        what makes one configured value correct for every request

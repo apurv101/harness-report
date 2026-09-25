@@ -67,7 +67,7 @@ data "aws_iam_policy_document" "api" {
   }
 
   # Reads against the run store, plus the rows the site itself writes: sessions, and the card for an evaluation
-  # it has queued.  No UpdateItem — that is the store's own rule (lib/store.py), not an accident of this policy.
+  # it has queued. Conditional transactions own cloud job state and daily limits.
   # BatchWriteItem is not optional despite the small writes: store.publish_card batches its two rows, and
   # auth._drop deletes a session partition the same way, so without it signing out fails quietly.
   statement {
@@ -80,6 +80,7 @@ data "aws_iam_policy_document" "api" {
       "dynamodb:DescribeTable",
       "dynamodb:GetItem", "dynamodb:Query",
       "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:BatchWriteItem",
+      "dynamodb:UpdateItem",
     ]
     resources = [aws_dynamodb_table.store.arn, "${aws_dynamodb_table.store.arn}/index/*"]
   }
@@ -95,13 +96,22 @@ data "aws_iam_policy_document" "api" {
   statement {
     sid       = "Enqueue"
     actions   = ["sqs:SendMessage", "sqs:GetQueueAttributes"]
-    resources = [aws_sqs_queue.leases.arn]
+    resources = [aws_sqs_queue.evaluations.arn]
   }
 
   statement {
     sid       = "RunFiles"
     actions   = ["s3:GetObject", "s3:ListBucket"]
     resources = [aws_s3_bucket.runs.arn, "${aws_s3_bucket.runs.arn}/*"]
+  }
+
+  dynamic "statement" {
+    for_each = local.runner == 1 ? [1] : []
+    content {
+      sid       = "WakeWorkers"
+      actions   = ["lambda:InvokeFunction"]
+      resources = [local.scaler_arn]
+    }
   }
 }
 
@@ -128,18 +138,19 @@ resource "aws_lambda_function" "api" {
 
   environment {
     variables = {
-      HR_PUBLIC_HOST   = local.host
-      HR_ORIGIN_SECRET = random_password.origin.result
-      HR_SECRET_PREFIX = "/${local.name}/"
-      HR_TABLE         = var.table_name
-      HR_SESSIONS      = "ddb"   # sessions are rows, not .auth/sessions.json — Lambda has no disk to share
-      HR_EVALS         = "queue" # record it and enqueue it; a runner with a Docker daemon does the work
-      HR_QUEUE_URL     = aws_sqs_queue.leases.url
-      HR_RUNS_BUCKET   = aws_s3_bucket.runs.bucket
-      BASE_URL         = "https://${local.host}"
-      GITHUB_CLIENT_ID = var.github_client_id
-      GITHUB_APP_ID    = var.github_app_id
-      GITHUB_APP_SLUG  = var.github_app_slug
+      HR_PUBLIC_HOST     = local.host
+      HR_ORIGIN_SECRET   = random_password.origin.result
+      HR_SECRET_PREFIX   = "/${local.name}/"
+      HR_TABLE           = var.table_name
+      HR_SESSIONS        = "ddb"   # sessions are rows, not .auth/sessions.json — Lambda has no disk to share
+      HR_EVALS           = "queue" # record it and enqueue it; a runner with a Docker daemon does the work
+      HR_QUEUE_URL       = aws_sqs_queue.evaluations.url
+      HR_SCALER_FUNCTION = var.enable_run_plane && var.runner_dispatch_enabled ? local.scaler_name : ""
+      HR_RUNS_BUCKET     = aws_s3_bucket.runs.bucket
+      BASE_URL           = "https://${local.host}"
+      GITHUB_CLIENT_ID   = var.github_client_id
+      GITHUB_APP_ID      = var.github_app_id
+      GITHUB_APP_SLUG    = var.github_app_slug
     }
   }
 

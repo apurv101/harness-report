@@ -27,7 +27,7 @@ function LiveResult({ id }: { id: string }) {
   const { state, events, error } = useEvaluation(id)
   if (error && !state) return <FlowLayout step={4}><p className="flow-helper">Could not load the run: {error}</p></FlowLayout>
   if (!state) return <FlowLayout step={4}><p className="flow-helper">Loading the result…</p></FlowLayout>
-  if (inProgress(state.eval.status)) return <Navigate to="/check" replace />
+  if (inProgress(state.eval.status)) return <Navigate to={`/check?repo=${encodeURIComponent(state.eval.repo)}&eval=${encodeURIComponent(id)}`} replace />
 
   const ev = state.eval; const r = state.result; const t = r?.tests
   const title = taskTitle(ev.task)
@@ -84,7 +84,7 @@ function LiveResult({ id }: { id: string }) {
       </div>
       {ev.status === 'done' && (
         <NextTests harness={ev.harness || ev.repo.replace('/', '-').toLowerCase()} repo={ev.repo} afterRun={ev.run}
-                   onStarted={id => { setEval(id); navigate('/check') }} />
+                   onStarted={id => { setEval(id); navigate(`/check?repo=${encodeURIComponent(ev.repo)}&eval=${encodeURIComponent(id)}`) }} />
       )}
     </FlowLayout>
   )

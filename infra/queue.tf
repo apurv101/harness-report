@@ -27,3 +27,25 @@ resource "aws_sqs_queue" "leases" {
     maxReceiveCount     = 3
   })
 }
+
+# New queue rather than replacing the existing standard queue: old messages can be drained safely.
+resource "aws_sqs_queue" "evaluations_dlq" {
+  name                      = "${local.name}-evaluations-dlq.fifo"
+  fifo_queue                = true
+  message_retention_seconds = 1209600
+  sqs_managed_sse_enabled   = true
+}
+
+resource "aws_sqs_queue" "evaluations" {
+  name                        = "${local.name}-evaluations.fifo"
+  fifo_queue                  = true
+  content_based_deduplication = false
+  visibility_timeout_seconds  = 900
+  receive_wait_time_seconds   = 20
+  message_retention_seconds   = 1209600
+  sqs_managed_sse_enabled     = true
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.evaluations_dlq.arn
+    maxReceiveCount     = 5
+  })
+}

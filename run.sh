@@ -79,7 +79,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/lib/execute.sh"    # 6. run
 . "$HERE/lib/oracle.sh"     # the oracle subcommand: a task's reference solution against its own tests
 [ $# -gt 0 ] || { help; exit 0; }
-[ -f "$HERE/.env" ] && { set -a; . "$HERE/.env"; set +a; }
+[ -f "$HERE/.env" ] && eval "$(python3 "$HERE/lib/dotenv.py" "$HERE/.env")"
+DATA="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "${HR_DATA_DIR:-$HERE}")"
 HARBOR_TASKS="${HARBOR_TASKS:-$HOME/Desktop/harbor-tasks}"
 
 # ------------------------------------------------------------------ the read-only subcommands
@@ -133,15 +134,22 @@ uses_bedrock() { local t; for t in "$MODEL" $(printf '%s' "$ROUTES" | tr ',' '\n
   case "$t" in anthropic|anthropic/*|openai|openai/*) ;; *) return 0 ;; esac; done; return 1; }
 case "$EGRESS" in record|none|inspect|open|allow:?*) ;; *) die "--egress: record | none | allow:<hosts> | inspect | open" ;; esac
 case "$POLICY" in flag|enforce|off) ;; *) die "--policy: flag | enforce | off" ;; esac
-if uses_bedrock; then : "${AWS_PROFILE:?AWS_PROFILE in .env (a route uses Bedrock)}"; fi
+if uses_bedrock && [ "${HR_RUNNER_EC2:-0}" != 1 ]; then : "${AWS_PROFILE:?AWS_PROFILE in .env (a route uses Bedrock)}"; fi
 docker info >/dev/null 2>&1 || die "Docker is not running"
 command -v claude >/dev/null || die "claude CLI not found (the analyze stage runs claude -p)"
 
 [[ "$URL" =~ github\.com[/:]([^/[:space:]]+)/([^/[:space:]#?]+) ]] || die "not a GitHub URL: $URL"
 OWNER="${BASH_REMATCH[1]}"; REPO="${BASH_REMATCH[2]%.git}"
 NAME="$(printf '%s-%s' "$OWNER" "$REPO" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9.-\n' '-')"
-WORK="$HERE/work/$NAME"; SRC="$WORK/repo"; RECIPE="$WORK/recipe.json"; IMAGE="hr-$NAME"; WRAPPER="$WORK/run-harness"
-RUN_ID="${RUN_ID:-$(date +%Y%m%dT%H%M%S)}"; mkdir -p "$WORK"
+RUN_ID="${RUN_ID:-$(date +%Y%m%dT%H%M%S)}"
+[[ "$RUN_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]] || die "invalid run id"
+WORK="$DATA/work/$NAME"; IMAGE="hr-$NAME"
+if [ "${HR_ISOLATED_RUN:-0}" = 1 ]; then
+  JOB_TAG="$(printf '%s' "$RUN_ID" | tr 'A-Z' 'a-z')"
+  WORK="$DATA/work/jobs/$RUN_ID/$NAME"; IMAGE="hr-job/$JOB_TAG"
+fi
+SRC="$WORK/repo"; RECIPE="$WORK/recipe.json"; WRAPPER="$WORK/run-harness"; mkdir -p "$WORK"
+JOB_LABEL=(); [ -z "${HR_LOCAL_EVAL_ID:-}" ] || JOB_LABEL=(--label "hr.evaluation=$HR_LOCAL_EVAL_ID")
 T0=$(date +%s)
 echo "repo   https://github.com/$OWNER/$REPO   →   $NAME"
 echo "model  $MODEL   (via proxy)"
@@ -174,7 +182,7 @@ trap 'emit type error msg "cancelled"; exit 143' TERM INT
 RUN_CMD="$(recipe_field run_command)"
 if [ -z "$TASKSET" ]; then
   # ---- ad-hoc task: base image from the recipe, no verifier
-  OUT="$HERE/runs/$RUN_ID"; mkdir -p "$OUT"; printf '%s\n' "$TASK" > "$OUT/task.txt"
+  OUT="$DATA/runs/$RUN_ID"; mkdir -p "$OUT"; printf '%s\n' "$TASK" > "$OUT/task.txt"
   INSTR="$OUT/task.txt"; OTAG="$IMAGE"; WORKDIR="$(recipe_field workdir /work)"; RUN="$RUN_ID"; TASKNAME=prompt; TDIR=""
   AGENT_T=3600; VERIF_T=0; RES_ARGS=()
   run_one
@@ -200,7 +208,7 @@ for TASKNAME in "${TASKS[@]}"; do
   INSTR="$TDIR/instruction.md"
   for i in $(seq 1 "$K"); do
     RUN="$RUN_ID-$TASKNAME"; [ "$K" -gt 1 ] && RUN="$RUN-k$i"
-    OUT="$HERE/runs/$RUN"
+    OUT="$DATA/runs/$RUN"
     run_one
     printf '{"task":"%s","k":%s,"reward":%s,"rc":%s,"seconds":%s}\n' "$TASKNAME" "$i" "$REWARD" "$RC" "$SECS" >> "$BATCH"
   done

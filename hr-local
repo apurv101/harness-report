@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""Run a local pool of Docker evaluation workers, separate from the HTTP server."""
+import argparse
+import os
+from pathlib import Path
+import signal
+import sys
+
+HERE = Path(__file__).resolve().parent
+sys.path[:0] = [str(HERE), str(HERE / "lib")]
+os.environ.setdefault("HR_EVALS", "local-queue")
+os.environ.setdefault("HR_DDB", "local")
+import evals
+from localrunner import Runner
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--workers", type=int, default=2, help="maximum simultaneous Docker evaluations (default 2)")
+    ap.add_argument("--per-user", type=int, default=1, help="maximum active evaluations per user (default 1)")
+    ap.add_argument("--status", action="store_true", help="list queued and running jobs")
+    a = ap.parse_args()
+    if not evals.LOCAL_QUEUED: ap.error("use HR_EVALS=local-queue")
+    if a.workers < 1 or a.per_user < 1: ap.error("worker limits must be positive")
+    if a.status:
+        for ev in evals.local_queue().active(): print(f"{ev['id']}  {ev['status']:9} {ev['user']:12} {ev['repo']}")
+        return
+    runner = Runner(a.workers, a.per_user)
+    for sig in (signal.SIGINT, signal.SIGTERM): signal.signal(sig, lambda *_: runner.stop.set())
+    try: runner.run()
+    except RuntimeError as e: sys.exit(str(e))
+
+
+if __name__ == "__main__": main()

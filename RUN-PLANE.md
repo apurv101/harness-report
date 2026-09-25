@@ -1,5 +1,10 @@
 # The run plane
 
+Implementation update (2026-09-25): [CLOUD.md](CLOUD.md) describes the implemented
+FIFO queue, conditional job state, on-demand capacity and stopped standby workers.
+The current implementation uses EBS for caches across stop/resume. The measurements and
+future optimizations below remain design context, not a description of every shipped feature.
+
 How a task submitted on harnessreport.com becomes a container on AWS. Design, 2026-09-24.
 
 Everything below is measured against the 43 local runs in `runs/`, the 160 local images, and the

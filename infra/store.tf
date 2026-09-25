@@ -70,7 +70,7 @@ resource "aws_dynamodb_table" "store" {
     }
   }
 
-  # Sessions expire themselves.  No run, recipe or eval row carries `ttl`, so nothing else is touched.
+  # Sessions expire themselves. Job state and run reports do not carry ttl.
   ttl {
     attribute_name = "ttl"
     enabled        = true
@@ -78,8 +78,8 @@ resource "aws_dynamodb_table" "store" {
 
   point_in_time_recovery { enabled = true }
 
-  # The table is a derived index — `./run.sh ddb sync` rebuilds every row from the run folders — so
-  # losing it costs one command, not data.  Still cheap to keep, so it is kept.
+  # Cloud JOB rows and daily counters are authoritative state, not rebuildable report indexes.
+  # PITR above protects them; a full stack destroy still explicitly removes the table.
   lifecycle { prevent_destroy = false }
 }
 

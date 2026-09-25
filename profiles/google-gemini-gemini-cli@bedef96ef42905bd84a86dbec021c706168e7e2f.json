@@ -1,0 +1,34 @@
+{
+  "use_case": "A terminal coding assistant powered by Gemini: you ask it in plain language to understand, edit, debug and test code in a local repo, and it reads and writes files, runs shell commands and git, and looks things up on the web. It can also run headless in scripts or GitHub Actions.",
+  "domains": [
+    "swe",
+    "tool-use",
+    "web-research"
+  ],
+  "languages": [
+    "javascript",
+    "python"
+  ],
+  "capabilities": [
+    "edits-files",
+    "runs-shell",
+    "runs-tests",
+    "uses-git",
+    "browses-web",
+    "multi-agent",
+    "long-horizon",
+    "reads-docs",
+    "calls-apis"
+  ],
+  "not_for": [
+    "no built-in GUI or desktop control",
+    "no dedicated database/SQL tooling beyond the shell or MCP servers",
+    "only uses Gemini models (Google auth, Gemini API key or Vertex AI)"
+  ],
+  "evidence": "README.md lines 17-28 and 108-144 describe a terminal-first agent with file-operation, shell, Google Search and web-fetch tools, plus MCP support, non-interactive scripting and GitHub Action integration. packages/core/src/tools/ contains the tools (edit, write-file, read-file, glob, grep/ripGrep, shell, web-search, web-fetch, write-todos, MCP and memory tools). packages/core/src/prompts/snippets.ts:192-193 sets the system prompt to \"an interactive CLI agent specializing in software engineering tasks\"; lines 260 and 367 tell it to add and run tests, lint and type-check (e.g. 'tsc', 'ruff check .'), and lines 506-519 give git commit steps. packages/core/src/agents/ has subagents (codebase-investigator, generalist) and remote A2A agents.",
+  "source": "claude -p",
+  "commit": "bedef96ef42905bd84a86dbec021c706168e7e2f",
+  "seconds": 20,
+  "cost_usd": 0.1299306,
+  "at": "2026-09-24T23:33:51"
+}

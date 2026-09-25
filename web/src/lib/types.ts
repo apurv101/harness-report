@@ -209,6 +209,8 @@ export interface EvalConsole {
 /** /api/me — whether sign-in is configured at all, and who is signed in. */
 export interface Session {
   auth: boolean
+  local_users?: boolean
+  eval_mode?: string
   user: GithubUser | null
   install_url: string
   can_clone: boolean
@@ -262,6 +264,8 @@ export interface Evaluation {
   rc?: number | null
   cancelled?: boolean
   error?: string | null
+  queue_position?: number
+  execution_started?: string
 }
 
 /** One line run.sh writes with HR_EVENTS set. */

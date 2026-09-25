@@ -1,5 +1,9 @@
 # harness-report
 
+For a local queue with multiple users and parallel Docker evaluations, see
+[LOCAL.md](LOCAL.md). Start `serve.py` with `HR_EVALS=local-queue` and run
+`./hr-local --workers 2 --per-user 1` alongside it.
+
 One command. Give it a GitHub repo that contains an AI agent harness and a task; it downloads the repo,
 has an AI write a Docker overlay for it, builds the sandbox, puts a recording proxy between the harness
 and the model, and runs the task. Every model call the harness makes is captured on the wire, in one
@@ -229,6 +233,7 @@ runnable pool for it with a model (`RECOMMEND_MODEL`, default haiku; the rules w
 | `HR_EVALS` | what `POST /api/evals` does | who sets it |
 |---|---|---|
 | `on` (default) | start `run.sh` here and follow the folder | `python3 serve.py` on a laptop |
+| `local-queue` | enqueue on disk; `hr-local` runs multiple isolated Docker evaluations | local multi-user testing; see [LOCAL.md](LOCAL.md) |
 | `queue` | record the evaluation, put a lease on SQS, report from the table | the hosted API, which has no Docker daemon |
 | `off` | refuse, with a reason | — |
 
@@ -250,8 +255,9 @@ export HR_TABLE=harness-report HR_DDB= AWS_PROFILE=operator
 since there the instance role is both. Without that split the daemon's profile is inherited into `lib/proxy.sh`,
 which forwards it to the proxy container, and every model call goes out as the control plane.
 
-Either way it is **one at a time** (a second start gets a 409 naming the running one) — in queue mode that holds
-across the fleet, because the check is a query against the table rather than a look at this process. With `HR_EVENTS` set, `run.sh` appends one JSON line per stage, recipe decision, run
+The original `on` and cloud `queue` modes reject another active evaluation with a 409. The cloud check is a
+query followed by a write, so it is not an atomic concurrency guarantee. `local-queue` accepts independent
+jobs and limits execution in its worker pool. With `HR_EVENTS` set, `run.sh` appends one JSON line per stage, recipe decision, run
 folder, result and error; the page polls `GET /api/evals/<id>?after=<n>` every 1.5 s for those events plus the live
 model-call count read from the run's `calls.jsonl`, then shows the real result. A private repository is cloned with a
 short-lived GitHub App installation token that reaches git only through its environment. Cancel sends SIGTERM to
@@ -305,8 +311,8 @@ The Lambda **is** `serve.py`: [`lambda/handler.py`](lambda/handler.py) turns the
 into the bytes of an HTTP request, lets `serve.H` answer it, and turns what it wrote back into a response.
 Terraform zips the package out of the repo's own files, so there is no build step for the API and an apply
 ships whatever is committed. Three environment variables are all that differ from the laptop: `HR_SESSIONS=ddb`
-(sessions are rows — Lambda has no disk to share), `HR_EVALS=off` (starting a run needs a Docker daemon, so
-`POST /api/evals` answers 503 until the run plane lands) and `HR_PUBLIC_HOST`.
+(sessions are rows — Lambda has no disk to share), `HR_EVALS=queue` (SQS FIFO hands jobs to EC2 workers)
+and `HR_PUBLIC_HOST`.
 
 ```sh
 AWS_PROFILE=operator infra/bootstrap.sh state      # once: the state bucket
@@ -321,14 +327,14 @@ plan as a comment. Credentials are OIDC, so CI holds no keys. `infra/README.md` 
 function URL is not behind OAC, where the secrets live, and what a destroy does and does not delete.
 
 The EC2 runner fleet from [RUN-PLANE.md](RUN-PLANE.md) is in `infra/runplane.tf` behind
-`enable_run_plane`, off by default until `hr-agentd` exists.
+`enable_run_plane`. See [CLOUD.md](CLOUD.md) for task upload, queue migration and worker activation.
 
 ## Signing in with GitHub
 
 `auth.py` gives `serve.py` a "Sign in with GitHub" flow built on one **GitHub App** — the same app both
 identifies the user (user-to-server OAuth) and grants the repositories we may clone (installation tokens).
 Recorded runs stay public either way — `/api/runs`, `/api/run/<id>` and `/raw/*` never ask who you are, because
-the runs are the showcase.  Signing in gates only `/api/github/*`, which acts on the signed-in user's behalf.  `auth.py` reads `.env` the way
+the runs are the showcase.  Signing in gates repository access and cloud evaluation submission. Evaluation progress and cancellation are scoped to the owner.  `auth.py` reads `.env` the way
 `run.sh` does, so the variables can live there; anything already in the environment wins.
 
 ```sh
@@ -354,3 +360,5 @@ and the simulated preview stands.
 `web/public/` holds `favicon.svg`, `robots.txt`, `sitemap.xml`, and `llms.txt`; the build copies them into
 `web/dist` beside the page. `web/dist` is generated and git-ignored, so it has to be built before a deploy —
 which the deploy workflow does, so nobody has to remember.
+
+For on-demand AWS workers, stopped standby, prepared images, queue migration and deployment checks, see [CLOUD.md](CLOUD.md).

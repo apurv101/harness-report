@@ -1,4 +1,4 @@
-"""evals.py — start run.sh from the site and follow it.  One evaluation at a time on this machine.
+"""evals.py — submit evaluations from the site and follow their progress.
 
 An evaluation is one click on "Run task": run.sh on the chosen repository and one Harbor task.  The task is the
 caller's pick from the runnable pool (lib/tasks.py: a candidate whose reference solution passes its own tests),
@@ -18,6 +18,7 @@ events and its console log, beside the runs it produced.  Best-effort: these thr
 HR_EVALS picks which half of that this process is:
 
     on      (default)  start run.sh here and follow the folder.  `python3 serve.py` on a laptop, and hr-agentd
+    local-queue        durable SQLite jobs; a separate hr-local pool runs isolated attempts in parallel
     queue              enqueue the lease and read progress back out of the table.  The hosted API, which has
                        no Docker daemon and no disk — it never runs anything, it only records and reports
     off                refuse, with a reason
@@ -26,17 +27,18 @@ In queue mode the table is the record rather than a copy of one, because the pro
 and the process that runs it are not the same process and share no disk.  Every reader below is written to work
 either way, so serve.py does not branch.
 """
-import json, os, re, signal, subprocess, sys, threading, time
+import json, os, re, secrets, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 import ddb, leases, store                           # the DynamoDB copy: the evaluation, its events, its console log
-EVALS = os.path.join(HERE, "evals")
-RUNS = os.path.join(HERE, "runs")           # run.sh always writes here
+DATA = os.path.abspath(os.environ.get("HR_DATA_DIR") or HERE)
+EVALS = os.path.join(DATA, "evals")
+RUNS = os.path.join(DATA, "runs")
 DEFAULT = ("aider_polyglot", "polyglot_python_bowling")     # the first task when nothing better is known
 DAILY_CAP = int(os.environ.get("HR_DAILY_CAP") or 5)        # evaluations one login may start per UTC day
 REPO_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
-EVAL_ID = re.compile(r"^\d{8}T\d{6}-[a-z0-9.-]{1,12}$")
+EVAL_ID = re.compile(r"^\d{8}T\d{6}-[a-z0-9.-]{1,12}(?:-[a-f0-9]{12})?$")
 
 # run.sh needs a Docker daemon and a writable tree.  A host with neither either hands the work to one that
 # has both (queue) or says so (off), rather than raising.
@@ -44,6 +46,17 @@ MODE = (os.environ.get("HR_EVALS") or "on").strip().lower()
 MODE = "off" if MODE in ("0", "off", "false", "no") else MODE
 ENABLED = MODE != "off"
 QUEUED = MODE == "queue"     # this process enqueues and reports; a runner elsewhere does the work
+LOCAL_QUEUED = MODE == "local-queue"
+LOCAL_USERS = LOCAL_QUEUED and os.environ.get("HR_LOCAL_USERS") == "1"
+if LOCAL_QUEUED:
+    from urllib.parse import urlsplit
+    if urlsplit(ddb.endpoint() or "").hostname not in ("127.0.0.1", "localhost", "::1"):
+        raise RuntimeError("local-queue requires HR_DDB=local and a loopback DynamoDB endpoint")
+
+
+def local_queue():
+    from localqueue import Queue
+    return Queue(os.path.join(EVALS, "queue.sqlite3"))
 
 LOCK = threading.Lock()
 PROCS = {}      # eval id -> Popen, for evaluations this server process started
@@ -161,24 +174,37 @@ def _settle(ev):
 def after_run(ev):
     """A finished run changes what the harness should run next: profile it (once per commit) and re-rank, in a
     detached process so neither a request thread nor the runner waits the minute that takes."""
+    if os.environ.get("HR_RECOMMEND") == "off": return
     if not (os.environ.get("HR_DDB") or os.environ.get("HR_DDB_ENDPOINT") or os.environ.get("HR_TABLE")): return
     import recommend
-    recommend.spawn_refresh(ev.get("harness") or harness_name(ev["repo"]))
+    name = ev.get("harness") or harness_name(ev["repo"])
+    src = os.path.join(DATA, "work", "jobs", ev["id"], name, "repo") if LOCAL_QUEUED or os.environ.get("HR_ISOLATED_RUN") == "1" else None
+    recommend.spawn_refresh(name, src=src)
 
 
 def get(eid):
     if not EVAL_ID.match(eid or ""): return None
-    if QUEUED: return store.eval_record(eid)
+    if LOCAL_QUEUED: return local_queue().get(eid)
+    if QUEUED:
+        import cloudqueue
+        state = cloudqueue.get(eid)
+        report = store.eval_record(eid)
+        return {**(report or {}), **state} if state else report
     if not os.path.isdir(_path(eid)): return None
     with LOCK:
         ev = _load(eid)
         return _settle(ev) if ev else None
 
 
-def current():
-    """The evaluation still running, if any.  In queue mode "running" includes "queued but not yet leased",
-    because one at a time has to hold across the whole fleet, not per process."""
-    if QUEUED: return store.running_eval()
+def current(user=None, repo=None):
+    """An active evaluation for this owner in queue modes; the singleton in legacy local mode."""
+    if LOCAL_QUEUED:
+        return next((e for e in local_queue().active(user or "local")
+                     if not repo or e["repo"].lower() == repo.lower()), None)
+    if QUEUED:
+        import cloudqueue
+        return next((e for e in cloudqueue.recent(user or "local") if e["status"] in ("queued", "running")
+                     and (not repo or e["repo"].lower() == repo.lower())), None)
     with LOCK: return _current()
 
 
@@ -200,8 +226,8 @@ def _record(repo, eid, user, status, taskset=DEFAULT[0], task=DEFAULT[1]):
 
 
 def _eid(repo):
-    slug = re.sub(r"[^a-z0-9.-]", "-", repo.lower().replace("/", "-"))[:12]   # keeps hr-proxy-<run> under 63 chars
-    return time.strftime("%Y%m%dT%H%M%S") + "-" + slug
+    slug = re.sub(r"[^a-z0-9.-]", "-", repo.lower().replace("/", "-"))[:12]
+    return time.strftime("%Y%m%dT%H%M%S", time.gmtime()) + "-" + slug + "-" + secrets.token_hex(6)
 
 
 def enqueue(repo, user=None, installation=None, taskset=None, task=None):
@@ -210,20 +236,22 @@ def enqueue(repo, user=None, installation=None, taskset=None, task=None):
 
     The lease carries the installation id, never a clone token — a token in a queue is a secret sitting in a
     queue, and the runner can mint its own from the app key it already needs for everything else."""
-    cur = store.running_eval()
-    if cur: raise Busy(cur)
-    check_cap(user)
+    import cloudqueue
+    if not user: raise Refused("sign in with GitHub to queue an evaluation")
     taskset, task = pick_task(repo, taskset, task)
     eid = _eid(repo)
     ev = _record(repo, eid, user, "queued", taskset, task)
-    store.publish_card(ev)                       # visible on the page before any runner has seen it
+    ev["installation"] = installation
+    try: ev = cloudqueue.enqueue(ev, DAILY_CAP)
+    except cloudqueue.Limit as e: raise Refused(str(e)) from e
     try:
         leases.send({"eval": eid, "repo": repo, "url": ev["url"], "taskset": taskset, "task": task,
                     "run": ev["run"], "user": user, "installation": installation})
     except leases.Error as e:
-        ev.update(status="failed", finished=time.strftime("%Y-%m-%dT%H:%M:%S"), error=f"could not queue it: {e}")
-        store.publish_card(ev)
+        cloudqueue.update(eid, {"status": "failed", "finished": cloudqueue.stamp(), "error": f"could not queue it: {e}"},
+                          expected=lambda e: e["status"] == "queued")
         raise
+    cloudqueue.wake()
     return ev
 
 
@@ -232,6 +260,16 @@ def start(repo, user=None, token=None, installation=None, taskset=None, task=Non
     Refused for a task the site does not offer or a login over its daily cap.
 
     In queue mode nothing starts here; the lease goes on the queue and a runner picks it up."""
+    if LOCAL_QUEUED:
+        from localqueue import Limit
+        taskset, task = pick_task(repo, taskset, task)
+        eid = _eid(repo)
+        ev = _record(repo, eid, user or "local", "queued", taskset, task)
+        ev["installation"] = installation
+        os.makedirs(_path(eid), exist_ok=True)
+        try: ev = local_queue().enqueue(ev, DAILY_CAP if user else 0)
+        except Limit as e: raise Refused(str(e)) from e
+        return ev
     if QUEUED: return enqueue(repo, user=user, installation=installation, taskset=taskset, task=task)
     with LOCK:
         cur = _current()
@@ -268,6 +306,8 @@ def cancel_queued(eid):
     A *queued* one has no process to signal, so it is settled to cancelled outright — leaving it queued would
     leave `running_eval()` returning it forever, and one-at-a-time would refuse every later run with a 409
     naming a lease nobody is working on.  Its message stays on the queue and the runner drops it on sight."""
+    import cloudqueue
+    if cloudqueue.get(eid): return cloudqueue.cancel(eid)
     ev = store.eval_record(eid)
     if not ev: return None
     if ev.get("status") == "queued":
@@ -281,6 +321,7 @@ def cancel_queued(eid):
 
 
 def cancel(eid):
+    if LOCAL_QUEUED: return local_queue().cancel(eid)
     if QUEUED: return cancel_queued(eid)
     with LOCK:
         ev = _load(eid) if EVAL_ID.match(eid or "") else None

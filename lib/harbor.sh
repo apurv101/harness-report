@@ -15,8 +15,9 @@ list_tasks() { local d; for d in "$1"/*/; do [ -f "$d/task.toml" ] && basename "
 # task_image <task-dir> <taskset> <task>: builds environment/Dockerfile (or pulls task.toml's docker_image); echoes the tag
 task_image() {
   local tdir="$1" tag="hr-task/$2:$3" prebuilt
+  [ "${HR_ISOLATED_RUN:-0}" != 1 ] || tag="hr-task/$JOB_TAG/$2:$3"
   if [ -f "$tdir/environment/Dockerfile" ]; then
-    docker build -q --platform "$PLATFORM" -t "$tag" "$tdir/environment" > "$WORK/task-build.log" 2>&1 || { tail -30 "$WORK/task-build.log" >&2; return 1; }
+    docker build -q ${JOB_LABEL[@]+"${JOB_LABEL[@]}"} --platform "$PLATFORM" -t "$tag" "$tdir/environment" > "$WORK/task-build.log" 2>&1 || { tail -30 "$WORK/task-build.log" >&2; return 1; }
   else
     IFS=$'\t' read -r _ _ _ _ _ _ prebuilt _ < <(task_meta "$tdir")
     [ -n "$prebuilt" ] || { echo "task $3 has neither environment/Dockerfile nor docker_image" >&2; return 1; }

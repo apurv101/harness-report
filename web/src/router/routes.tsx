@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router-dom'
 import { PageLayout } from '../components/layout/PageLayout'
 import { CheckPage } from '../pages/CheckPage'
+import { EvaluationsPage } from '../pages/EvaluationsPage'
 import { HarnessPage } from '../pages/HarnessPage'
 import { HarnessesPage } from '../pages/HarnessesPage'
 import { ImportPage } from '../pages/ImportPage'
@@ -28,6 +29,7 @@ export function AppRoutes() {
         <Route path="/check" element={<RequireRepo><CheckPage /></RequireRepo>} />
         <Route path="/check/result" element={<RequireResult><ResultPage /></RequireResult>} />
         <Route path="/runs" element={<RunsPage />} />
+        <Route path="/evaluations" element={<RequireSignedIn><EvaluationsPage /></RequireSignedIn>} />
         <Route path="/runs/:runId" element={<RunDetailPage />} />
         <Route path="/harnesses" element={<HarnessesPage />} />
         <Route path="/harnesses/:name" element={<HarnessPage />} />

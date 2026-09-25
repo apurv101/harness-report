@@ -22,7 +22,7 @@ anything has run: they need nothing but the repo's language and description, so 
                                                      hr-agentd and evals.py run after every settled run
     lib/recommend.py first <owner/repo> [--language L] [--description D]   the first task, by the rules
 """
-import argparse, json, os, re, subprocess, sys, time
+import argparse, contextlib, json, os, re, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -95,7 +95,9 @@ def profile(name, src=None, commit=None, force=False):
         prof = {**so, "source": "claude -p", "commit": commit, "seconds": round(time.time() - t0),
                 "cost_usd": out.get("total_cost_usd"), "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
         prof["languages"] = sorted({lang(x) for x in prof.get("languages") or [] if x})
-        json.dump(prof, open(cache, "w"), indent=2)
+        with tempfile.NamedTemporaryFile(mode="w", dir=PROFILES, delete=False) as f:
+            json.dump(prof, f, indent=2)
+        os.replace(f.name, cache)
     store.publish_profile(name, prof)
     return prof
 
@@ -214,26 +216,41 @@ def rank(name, rules_only=False):
     return row
 
 
-def refresh(name):
+@contextlib.contextmanager
+def refresh_lock(name):
+    if os.environ.get("HR_EVALS") != "local-queue":
+        yield
+        return
+    import fcntl
+    os.makedirs(PROFILES, exist_ok=True)
+    with open(os.path.join(PROFILES, f".{name}.lock"), "a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def refresh(name, src=None):
     """After a run: profile the clone if this commit has no profile yet, then re-rank.  Never raises — a run has
     already finished and been published; this only adds advice beside it."""
     try:
-        card = store.harness(name) or {}
-        have = store.harness_profile(name) or {}
-        if have.get("commit") != card.get("commit") or have.get("source") != "claude -p":
-            try: profile(name, commit=card.get("commit"))
-            except (SystemExit, OSError, subprocess.SubprocessError, ValueError) as e: log(f"{name}: no profile: {e}")
-        return rank(name)
+        with refresh_lock(name):
+            card = store.harness(name) or {}
+            have = store.harness_profile(name) or {}
+            # Concurrent jobs can finish with different commits. Never label an older clone as the latest one.
+            clone_commit = subprocess.run(["git", "-C", src, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip() if src else card.get("commit")
+            if clone_commit == card.get("commit") and (have.get("commit") != clone_commit or have.get("source") != "claude -p"):
+                try: profile(name, src=src, commit=clone_commit)
+                except (SystemExit, OSError, subprocess.SubprocessError, ValueError) as e: log(f"{name}: no profile: {e}")
+            return rank(name)
     except (ddb.Error, SystemExit, OSError, ValueError) as e:
         log(f"{name}: no recommendations: {e}")
         return None
 
 
-def spawn_refresh(name):
+def spawn_refresh(name, src=None):
     """refresh() in a detached process, so the caller (a request thread, the runner's loop) is not held for the
     minute a profile takes."""
     try:
-        subprocess.Popen([sys.executable, os.path.abspath(__file__), "refresh", name], cwd=ROOT,
+        subprocess.Popen([sys.executable, os.path.abspath(__file__), "refresh", name, *(["--src", src] if src else [])], cwd=ROOT,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=open(os.path.join(ROOT, "work", f"recommend-{name}.log"), "a")
                          if os.path.isdir(os.path.join(ROOT, "work")) else subprocess.DEVNULL, start_new_session=True)
     except OSError as e: log(f"could not start refresh for {name}: {e}")
@@ -259,12 +276,12 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("profile"); p.add_argument("name"); p.add_argument("--src"); p.add_argument("--commit"); p.add_argument("--force", action="store_true")
     p = sub.add_parser("rank"); p.add_argument("name"); p.add_argument("--rules", action="store_true")
-    p = sub.add_parser("refresh"); p.add_argument("name")
+    p = sub.add_parser("refresh"); p.add_argument("name"); p.add_argument("--src")
     p = sub.add_parser("first"); p.add_argument("repo"); p.add_argument("--language"); p.add_argument("--description")
     a = ap.parse_args()
     if a.cmd == "profile": print(json.dumps(profile(a.name, a.src, a.commit, a.force), indent=2))
     elif a.cmd == "rank": print(json.dumps(rank(a.name, a.rules), indent=2))
-    elif a.cmd == "refresh": print(json.dumps(refresh(a.name), indent=2))
+    elif a.cmd == "refresh": print(json.dumps(refresh(a.name, a.src), indent=2))
     elif a.cmd == "first": print(json.dumps(first(a.repo, a.language, a.description), indent=2))
 
 

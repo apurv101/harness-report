@@ -12,12 +12,13 @@ import { getUserRepos } from '../lib/api'
 import { SAMPLE_REPOS } from '../lib/preview'
 import type { RepoOption } from '../lib/types'
 import { usePreview } from '../state/PreviewContext'
-import { useLive } from '../state/SessionContext'
+import { useLive, useSession } from '../state/SessionContext'
 
 /** Step 2.  Signed in for real, these are the repositories the app installation grants. */
 export function ImportPage() {
   useDocumentTitle('Import a harness · Harness Report')
   const live = useLive()
+  const local = useSession()?.local_users
   const { selectRepo } = usePreview()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
@@ -44,7 +45,7 @@ export function ImportPage() {
         <div className="repo-list">
           {error ? <InstallOffer lead="Could not reach GitHub. Paste a repository URL below, or try again:" />
            : !data ? <RepoEmpty>Loading your repositories…</RepoEmpty>
-           : !data.length ? <InstallOffer lead="Paste a public repository URL below — or, for a private one:" />
+           : !data.length ? local ? <RepoEmpty>Paste a public GitHub repository URL below.</RepoEmpty> : <InstallOffer lead="Paste a public repository URL below — or, for a private one:" />
            : matches.length ? <RepoList repos={matches} onSelect={choose} />
            : live ? <InstallOffer lead={`No repository matches “${query.trim()}”. Paste its URL below, or:`} />
            : <RepoEmpty>No repositories found. Try another name or paste a GitHub URL below.</RepoEmpty>}
@@ -52,7 +53,7 @@ export function ImportPage() {
         <RepoUrlForm onSelect={choose} />
       </div>
       <p className="flow-bottom-note">
-        <Icon name="lock" /> {live ? 'Only the repositories you install Harness Report on' : 'Sample repositories · Preview only'}
+        <Icon name="lock" /> {local ? 'Local test users can evaluate public repositories' : live ? 'Only the repositories you install Harness Report on' : 'Sample repositories · Preview only'}
       </p>
     </FlowLayout>
   )

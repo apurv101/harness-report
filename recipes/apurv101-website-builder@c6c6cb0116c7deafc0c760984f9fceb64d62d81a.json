@@ -1,0 +1,56 @@
+{
+  "summary": "This repo (apurv101/website-builder) is a config wrapper around the stock OpenClaw agent (npm package `openclaw`). It holds no agent code of its own: a config.json that denies the cron/nodes/gateway tools and allows the browser/canvas/openai-image-gen bundled skills, plus a workspace/ folder (SOUL.md, IDENTITY.md, website skills and scripts). The recipe installs Node 24 and openclaw@2026.9.6 under /opt/harness and copies the repo to /opt/harness/src. It then writes a pinned OpenClaw config that keeps the repo's tool and skill policy, adds the repo's workspace/skills as an extra skill root, and defines a custom provider called `proxy`. That provider uses api `openai-completions`, has baseUrl ${PROXY_URL}/v1, and serves model `gpt-6-astra`, which is OpenClaw's built-in default (DEFAULT_PROVIDER=openai, DEFAULT_MODEL=gpt-6-astra). The entrypoint is `openclaw agent exec`, OpenClaw's headless one-shot embedded runner. It needs no gateway, uses --cwd as both the workspace and the tool working directory, and exits 0 on success, 1 on error and 2 on timeout. Model calls go through OpenClaw's OpenAI-compatible chat-completions client to the proxy.",
+  "base_image": "buildpack-deps:jammy",
+  "dockerfile": "ARG BASE=buildpack-deps:jammy\nFROM ${BASE}\n\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update \\\n && apt-get install -y --no-install-recommends ca-certificates curl git xz-utils \\\n && rm -rf /var/lib/apt/lists/*\n\n# Self-contained Node 24 (openclaw requires node >=24.16 <25) under /opt/harness/node\nRUN set -eux; \\\n    arch=\"$(dpkg --print-architecture)\"; \\\n    case \"$arch\" in amd64) narch=x64 ;; arm64) narch=arm64 ;; *) echo \"unsupported arch $arch\"; exit 1 ;; esac; \\\n    mkdir -p /opt/harness/node /opt/harness/bin; \\\n    tarball=\"$(curl -fsSL https://nodejs.org/dist/latest-v24.x/SHASUMS256.txt | awk '{print $2}' | grep -E \"^node-v24\\.[0-9.]+-linux-${narch}\\.tar\\.xz$\" | head -n1)\"; \\\n    curl -fsSL \"https://nodejs.org/dist/latest-v24.x/${tarball}\" | tar -xJ -C /opt/harness/node --strip-components=1; \\\n    /opt/harness/node/bin/node --version\n\nENV PATH=/opt/harness/bin:/opt/harness/node/bin:$PATH\n\n# Harness: stock OpenClaw (the repo is a config wrapper around it)\nRUN npm install -g --prefix /opt/harness/node openclaw@2026.9.6 \\\n && npm cache clean --force \\\n && ln -sf /opt/harness/node/bin/openclaw /opt/harness/bin/openclaw\n\n# The repo's own config + workspace (SOUL.md, skills, scripts)\nCOPY . /opt/harness/src\n\n# Pinned OpenClaw config: repo tool/skill policy + repo skills + proxy-backed provider.\n# ${PROXY_URL} and ${OPENAI_API_KEY} are resolved by OpenClaw's config env substitution at run time.\nRUN printf '%s\\n' '{\"agents\":{\"defaults\":{\"model\":{\"primary\":\"proxy/gpt-6-astra\"}}},\"models\":{\"mode\":\"merge\",\"providers\":{\"proxy\":{\"baseUrl\":\"${PROXY_URL}/v1\",\"apiKey\":\"${OPENAI_API_KEY}\",\"api\":\"openai-completions\",\"timeoutSeconds\":600,\"models\":[{\"id\":\"gpt-6-astra\",\"name\":\"gpt-6-astra\",\"reasoning\":false,\"input\":[\"text\"],\"contextWindow\":200000,\"maxTokens\":32000}]}}},\"tools\":{\"deny\":[\"cron\",\"nodes\",\"gateway\"]},\"skills\":{\"allowBundled\":[\"browser\",\"canvas\",\"openai-image-gen\"],\"load\":{\"extraDirs\":[\"/opt/harness/src/workspace/skills\"]}}}' > /opt/harness/openclaw.json \\\n && mkdir -p /opt/harness/home\n",
+  "run_command": "mkdir -p /out/openclaw-state && openclaw agent exec --config /opt/harness/openclaw.json --model proxy/gpt-6-astra --cwd \"$PWD\" --state-dir /out/openclaw-state --timeout 3600 --json \"$TASK\" > /out/openclaw-result.json; rc=$?; cat /out/openclaw-result.json; exit $rc",
+  "check_command": "openclaw --version && openclaw agent exec --help",
+  "env": [
+    {
+      "name": "OPENAI_API_KEY",
+      "value": "proxy"
+    },
+    {
+      "name": "OPENAI_BASE_URL",
+      "value": "$PROXY_URL/v1"
+    },
+    {
+      "name": "PROXY_URL",
+      "value": "$PROXY_URL"
+    },
+    {
+      "name": "OPENCLAW_NO_AUTO_UPDATE",
+      "value": "1"
+    },
+    {
+      "name": "OPENCLAW_NO_PROMPT",
+      "value": "1"
+    },
+    {
+      "name": "OPENCLAW_NO_ONBOARD",
+      "value": "1"
+    },
+    {
+      "name": "OPENCLAW_SKIP_ONBOARDING",
+      "value": "1"
+    },
+    {
+      "name": "OPENCLAW_DISABLE_BONJOUR",
+      "value": "1"
+    },
+    {
+      "name": "OPENCLAW_SKIP_CHANNELS",
+      "value": "1"
+    },
+    {
+      "name": "OPENCLAW_SKIP_CRON",
+      "value": "1"
+    },
+    {
+      "name": "CI",
+      "value": "1"
+    }
+  ],
+  "api_style": "openai",
+  "workdir": "/work",
+  "notes": "What the harness is: the repo only wraps OpenClaw. Its own Dockerfile runs `npm i -g openclaw@latest` and starts `openclaw gateway run`, a WhatsApp/web gateway, which does not suit a one-shot run. I pinned openclaw@2026.9.6, the current latest, and use `openclaw agent exec` instead. According to docs/cli/agent.md, that is OpenClaw's headless CI entry point: it needs no gateway, uses a temporary or --state-dir state directory, prints the final text or a JSON envelope, and exits 0/1/2.\n\nModel routing: OpenClaw's built-in default is openai/gpt-6-astra. OpenClaw's native `openai` provider may use the Responses API or the Codex harness plugin, and the proxy only speaks chat-completions, so the config does not override `openai`. It defines a custom provider `proxy` with api `openai-completions` and baseUrl ${PROXY_URL}/v1 that serves the same model id, `gpt-6-astra`. The proxy therefore receives the harness's default model name. Custom providers on a non-api.openai.com baseUrl skip OpenAI-only request shaping, and OpenClaw trusts the exact configured baseUrl origin, so the proxy works even on a private IP. If you would rather use Anthropic messages, change the provider to api `anthropic-messages`, set baseUrl to ${PROXY_URL}, and use a claude model id (OpenClaw's Anthropic default is claude-opus-5). OPENAI_BASE_URL is set only as a harmless extra; routing comes from the config file.\n\nConfig and skills: the config is pinned with --config, so no ambient ~/.openclaw config or credentials are used. It uses OpenClaw's `${VAR}` config substitution for PROXY_URL and OPENAI_API_KEY. That is why PROXY_URL is also exported into the env, on the assumption that the literal $PROXY_URL is substituted in env values too. It keeps the repo's tools.deny [\"cron\",\"nodes\",\"gateway\"] and skills.allowBundled, and adds /opt/harness/src/workspace/skills (the website-builder skills) as an extra skill root. I left out the repo's legacy `agent.extraSystemPrompt` key and the SOUL.md bootstrap: `agent exec` skips workspace bootstrap files, and an unknown key could fail strict config validation.\n\nOutput: session transcripts and state are kept in /out/openclaw-state, and the JSON result envelope (final text, usage, toolSummary, model/provider) goes to /out/openclaw-result.json. Exec defaults apply: no sandbox, the `coding` tool profile, and file tools scoped to --cwd.\n\nBase-image safety: the base image's python and node are never touched. Node 24 is unpacked under /opt/harness/node, and apt installs only ca-certificates, curl, git and xz-utils. openclaw's native deps (@lydell/node-pty, koffi) ship prebuilt binaries, and its postinstall stages bundled plugins during the build (network access is needed at build time only).\n\nUnverified: none of this has been built or run. The main risks are strict validation rejecting a config key (models.mode, skills.load.extraDirs or timeoutSeconds; drop the offending key if so) and whether agent exec prefers the pinned config's default model. The explicit --model proxy/gpt-6-astra covers the second.\n\nHousekeeping: I downloaded the openclaw tarball to /Users/aj/Desktop/ocpkg to read its docs. A safety check blocked removing it, so please delete that folder yourself."
+}

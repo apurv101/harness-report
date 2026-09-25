@@ -22,7 +22,7 @@ export function readPreview(): PreviewState {
   if (typeof state !== 'object' || state === null || Array.isArray(state)) return {}
   const clean = { ...state } as PreviewState
   if (typeof clean.repo !== 'string' || !REPO_NAME.test(clean.repo)) delete clean.repo
-  if (typeof clean.evalId !== 'string' || !/^\d{8}T\d{6}-[a-z0-9.-]{1,12}$/.test(clean.evalId)) delete clean.evalId
+  if (typeof clean.evalId !== 'string' || !/^\d{8}T\d{6}-[a-z0-9.-]{1,12}(?:-[a-f0-9]{12})?$/.test(clean.evalId)) delete clean.evalId
   return clean
 }
 

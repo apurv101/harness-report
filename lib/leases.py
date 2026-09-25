@@ -26,7 +26,7 @@ Local's constants fails in a way that reads like a permissions problem.
 A lease that is never deleted is redelivered up to the queue's maxReceiveCount and then goes to the dead-letter
 queue, so a runner that dies mid-run loses the run but not the record of it.
 """
-import json, os, urllib.error, urllib.parse, urllib.request
+import hashlib, json, os, urllib.error, urllib.parse, urllib.request
 
 import ddb
 
@@ -68,7 +68,11 @@ def call(op, payload):
 
 def send(body):
     """One lease onto the queue.  `body` is a dict; it travels as JSON."""
-    return call("SendMessage", {"MessageBody": json.dumps(body)}).get("MessageId")
+    request = {"MessageBody": json.dumps(body)}
+    if url().endswith(".fifo"):
+        request.update(MessageGroupId=hashlib.sha256(body["user"].lower().encode()).hexdigest(),
+                       MessageDeduplicationId=body["eval"])
+    return call("SendMessage", request).get("MessageId")
 
 
 def receive(wait=20, visibility=None):

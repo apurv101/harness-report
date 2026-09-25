@@ -1,12 +1,5 @@
-# ---------------------------------------------------------------- the run plane
-#
-# RUN-PLANE.md, as infrastructure.  Everything here is behind `enable_run_plane`, and it is false by
-# default for one honest reason: hr-agentd — the poller that leases from the queue, runs run.sh's
-# stages and syncs the folder to S3 — is not written yet.  The queue, the role and the launch
-# template are correct and cost nothing at zero desired capacity; the fleet is what waits.
-#
-# The shape, from the measurements in that document: one VM per evaluation session (user x harness),
-# many task containers on it, because image locality is worth 30-60 s on a 53 s job.
+# Disposable EC2 workers: one evaluation per VM, separate users run on separate kernels.
+# A short-lived controller wakes stopped workers on demand; no running idle minimum.
 
 locals {
   runner = var.enable_run_plane ? 1 : 0
@@ -30,7 +23,7 @@ data "aws_iam_policy_document" "runner" {
   statement {
     sid       = "Leases"
     actions   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:ChangeMessageVisibility", "sqs:GetQueueAttributes"]
-    resources = [aws_sqs_queue.leases.arn]
+    resources = [aws_sqs_queue.evaluations.arn]
   }
 
   statement {
@@ -47,7 +40,7 @@ data "aws_iam_policy_document" "runner" {
 
   statement {
     sid       = "RunStore"
-    actions   = ["dynamodb:PutItem", "dynamodb:BatchWriteItem", "dynamodb:GetItem", "dynamodb:Query"]
+    actions   = ["dynamodb:DescribeTable", "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:BatchWriteItem", "dynamodb:GetItem", "dynamodb:Query", "dynamodb:UpdateItem"]
     resources = [aws_dynamodb_table.store.arn, "${aws_dynamodb_table.store.arn}/index/*"]
   }
 
@@ -74,13 +67,41 @@ data "aws_iam_policy_document" "runner" {
     resources = ["*"]
   }
 
-  # An instance tags itself hr:state=free when its images are pulled, and the allocator flips it to
-  # leased.  Scoped by the tag it is allowed to write, not by instance.
   statement {
-    sid       = "SelfTag"
-    actions   = ["ec2:CreateTags", "ec2:DescribeTags", "ec2:DescribeInstances"]
+    sid       = "RunnerAssets"
+    actions   = ["s3:GetObject", "s3:ListBucket"]
+    resources = [aws_s3_bucket.runner_assets[0].arn, "${aws_s3_bucket.runner_assets[0].arn}/*"]
+  }
+
+  statement {
+    sid       = "PrivateCloneKey"
+    actions   = ["ssm:GetParameter"]
+    resources = ["arn:aws:ssm:${var.region}:${local.account}:parameter/${local.name}/GITHUB_APP_KEY"]
+  }
+
+  statement {
+    sid       = "ProxyModelSession"
+    actions   = ["sts:AssumeRole"]
+    resources = [aws_iam_role.proxy_model[0].arn]
+  }
+
+  statement {
+    sid       = "JobProtection"
+    actions   = ["autoscaling:SetInstanceProtection", "autoscaling:CompleteLifecycleAction"]
+    resources = ["arn:aws:autoscaling:${var.region}:${local.account}:autoScalingGroup:*:autoScalingGroupName/${local.name}-runner"]
+  }
+
+  statement {
+    actions   = ["autoscaling:DescribeAutoScalingInstances"]
     resources = ["*"]
   }
+
+  statement {
+    sid       = "RetireWorker"
+    actions   = ["lambda:InvokeFunction"]
+    resources = [local.scaler_arn]
+  }
+
 }
 
 resource "aws_iam_role" "runner" {
@@ -153,21 +174,21 @@ data "aws_subnets" "default" {
 resource "aws_launch_template" "runner" {
   count         = local.runner
   name          = "${local.name}-runner"
-  image_id      = data.aws_ami.ubuntu[0].id
+  image_id      = var.runner_ami_id != "" ? var.runner_ami_id : data.aws_ami.ubuntu[0].id
   instance_type = var.runner_instance_type
 
   iam_instance_profile { arn = aws_iam_instance_profile.runner[0].arn }
   vpc_security_group_ids = [aws_security_group.runner[0].id]
 
-  # The disk is a cache, never state, so the instance terminates rather than stops: instance store
-  # is wiped on stop and there is nothing worth keeping on the root volume either.
+  # Only never-used instances are stopped in the warm pool. Used workers terminate.
   instance_initiated_shutdown_behavior = "terminate"
 
   block_device_mappings {
     device_name = "/dev/sda1"
     ebs {
-      volume_size           = 30
+      volume_size           = var.runner_disk_gb
       volume_type           = "gp3"
+      throughput            = 250
       delete_on_termination = true
       encrypted             = true
     }
@@ -184,12 +205,23 @@ resource "aws_launch_template" "runner" {
   monitoring { enabled = true }
 
   user_data = base64encode(templatefile("${path.module}/runner-init.sh", {
-    region         = var.region
-    queue_url      = aws_sqs_queue.leases.url
-    runs_bucket    = aws_s3_bucket.runs.bucket
-    recipes_bucket = aws_s3_bucket.recipes.bucket
-    table          = var.table_name
-    registry       = "${local.account}.dkr.ecr.${var.region}.amazonaws.com"
+    region          = var.region
+    queue_url       = aws_sqs_queue.evaluations.url
+    runs_bucket     = aws_s3_bucket.runs.bucket
+    recipes_bucket  = aws_s3_bucket.recipes.bucket
+    table           = var.table_name
+    assets_bucket   = aws_s3_bucket.runner_assets[0].bucket
+    release_key     = aws_s3_object.runner_release[0].key
+    model           = var.runner_model
+    analyzer_model  = var.runner_analyzer_model
+    model_role      = aws_iam_role.proxy_model[0].arn
+    github_app_id   = var.github_app_id
+    secret_prefix   = "/${local.name}/"
+    asg_name        = "${local.name}-runner"
+    max_seconds     = var.runner_max_job_seconds
+    scaler_function = local.scaler_name
+    install_script  = file("${path.module}/runner-install.sh")
+    service_seconds = var.runner_max_job_seconds + 600
   }))
 
   tag_specifications {
@@ -199,34 +231,60 @@ resource "aws_launch_template" "runner" {
 }
 
 resource "aws_autoscaling_group" "runner" {
-  count               = local.runner
-  name                = "${local.name}-runner"
-  vpc_zone_identifier = data.aws_subnets.default[0].ids
-  min_size            = 0
-  max_size            = var.runner_max_size
-  desired_capacity    = var.runner_warm_pool
+  count                 = local.runner
+  name                  = "${local.name}-runner"
+  vpc_zone_identifier   = data.aws_subnets.default[0].ids
+  min_size              = 0
+  max_size              = var.runner_max_size
+  desired_capacity      = 0
+  protect_from_scale_in = true
+
+  initial_lifecycle_hook {
+    name                 = "worker-ready"
+    lifecycle_transition = "autoscaling:EC2_INSTANCE_LAUNCHING"
+    heartbeat_timeout    = 1800
+    default_result       = "ABANDON"
+  }
+
+  dynamic "warm_pool" {
+    for_each = var.runner_dispatch_enabled && var.runner_warm_pool > 0 ? [1] : []
+    content {
+      pool_state                  = "Stopped"
+      min_size                    = var.runner_warm_pool
+      max_group_prepared_capacity = var.runner_warm_pool
+      instance_reuse_policy { reuse_on_scale_in = false }
+    }
+  }
 
   launch_template {
     id      = aws_launch_template.runner[0].id
     version = "$Latest"
   }
 
-  # An instance only counts as ready once runner-init.sh has pulled the bake list and tagged itself
-  # free; until then the pool is deeper than it looks.
+  # Boot installs the release, then systemd starts the queue consumer.
   health_check_type         = "EC2"
-  health_check_grace_period = 300
+  health_check_grace_period = 900
   capacity_rebalance        = false
 
   instance_refresh {
     strategy = "Rolling"
-    preferences { min_healthy_percentage = 0 }
+    preferences {
+      min_healthy_percentage       = 100
+      max_healthy_percentage       = 150
+      scale_in_protected_instances = "Wait"
+      skip_matching                = true
+    }
   }
 
-  tag {
-    key                 = "hr:state"
-    value               = "booting"
-    propagate_at_launch = true
+  lifecycle {
+    ignore_changes = [desired_capacity]
+    precondition {
+      condition     = var.runner_warm_pool >= 0 && var.runner_warm_pool <= var.runner_max_size && var.runner_warm_pool == floor(var.runner_warm_pool)
+      error_message = "runner_warm_pool must be a whole number between 0 and runner_max_size."
+    }
   }
+
+  depends_on = [aws_iam_role_policy.runner, aws_iam_role_policy.proxy_model, aws_lambda_function.scaler]
 
   dynamic "tag" {
     for_each = local.tags
@@ -236,4 +294,32 @@ resource "aws_autoscaling_group" "runner" {
       propagate_at_launch = true
     }
   }
+}
+
+# The proxy can call models, but cannot read the queue, table, source bundle or app key.
+resource "aws_iam_role" "proxy_model" {
+  count = local.runner
+  name  = "${local.name}-proxy-model"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
+      Principal = { AWS = aws_iam_role.runner[0].arn }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "proxy_model" {
+  count = local.runner
+  role  = aws_iam_role.proxy_model[0].id
+  name  = "model-only"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+      Resource = "*"
+    }]
+  })
 }

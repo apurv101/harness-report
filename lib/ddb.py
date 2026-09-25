@@ -81,6 +81,12 @@ def real_credentials():
     """The account's own keys, never the DynamoDB Local constants.  Anything that is not DynamoDB wants these:
     a laptop with HR_DDB=local still talks to the real SQS, and signing that with "hrlocal" fails in a way that
     reads like a permissions problem."""
+    if os.environ.get("HR_RUNNER_EC2") == "1":
+        import boto3
+        credentials = boto3.Session().get_credentials()
+        if not credentials: raise Error("NoCredentials", "runner instance role is unavailable")
+        frozen = credentials.get_frozen_credentials()
+        return frozen.access_key, frozen.secret_key, frozen.token
     k, s = os.environ.get("AWS_ACCESS_KEY_ID"), os.environ.get("AWS_SECRET_ACCESS_KEY")
     if k and s: return k, s, os.environ.get("AWS_SESSION_TOKEN")
     profile = os.environ.get("AWS_PROFILE") or "default"
@@ -208,7 +214,7 @@ def get(pk, sk, name=None, consistent=True):
 INDEX_KEYS = {None: ("pk", "sk"), "harness": ("gsi1pk", "gsi1sk"), "task": ("gsi2pk", "gsi2sk")}
 
 
-def query(pk, prefix=None, index=None, desc=False, limit=None, name=None, attributes=None, after=None):
+def query(pk, prefix=None, index=None, desc=False, limit=None, name=None, attributes=None, after=None, consistent=False):
     """Every item in one partition, optionally narrowed to a sort-key prefix.  Pages until the partition is done
     (or `limit` items are in hand), which is what every read in this repo wants.  `after` (a base-table sort key)
     starts the read just past that row — the cursor a paged list hands back to its caller."""
@@ -218,6 +224,7 @@ def query(pk, prefix=None, index=None, desc=False, limit=None, name=None, attrib
     req = {"TableName": table(name), "KeyConditionExpression": cond, "ExpressionAttributeValues": values,
            "ScanIndexForward": not desc}
     if index: req["IndexName"] = index
+    if consistent: req["ConsistentRead"] = True
     if after and not index: req["ExclusiveStartKey"] = {"pk": {"S": pk}, "sk": {"S": after}}
     if attributes:
         req["ProjectionExpression"] = ", ".join(f"#a{i}" for i, _ in enumerate(attributes))

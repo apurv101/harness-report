@@ -14,7 +14,7 @@ import { BOWLING, inProgress, LIVE_STAGES, progress, taskTitle } from '../lib/ev
 import type { FirstTask, Rec, TaskCard } from '../lib/types'
 import { FIZZBUZZ_OUTPUT, STAGES } from '../lib/preview'
 import { usePreview } from '../state/PreviewContext'
-import { useServed } from '../state/SessionContext'
+import { useServed, useSession } from '../state/SessionContext'
 
 /**
  * Step 3.  One task to prove the loop works end to end.  With serve.py behind the page it is real: run.sh on the
@@ -28,13 +28,14 @@ export function CheckPage() {
 }
 
 function LiveCheck() {
+  const queued = ['local-queue', 'queue'].includes(useSession()?.eval_mode || '')
   const { repo: chosen, repoMeta, selectRepo, setEval } = usePreview()
   const navigate = useNavigate()
   const [params] = useSearchParams()
   // A /check?repo=…&taskset=…&task=… link (a harness page, a task page, MCP's run_url) names the run outright.
   const repo = params.get('repo') || chosen!
   const named = params.get('taskset') && params.get('task') ? { taskset: params.get('taskset')!, task: params.get('task')! } : null
-  const [evalId, setEvalId] = useState<string | null>(null)
+  const [evalId, setEvalId] = useState<string | null>(params.get('eval'))
   const [starting, setStarting] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const [busyWith, setBusyWith] = useState<string | null>(null)
@@ -47,9 +48,9 @@ function LiveCheck() {
     if (!adopted.current && repo && repo !== chosen) { adopted.current = true; selectRepo(repo) }
   }, [repo, chosen, selectRepo])
 
-  // One evaluation at a time on this machine: if one is already running (this tab refreshed, or another tab
-  // started it), follow it instead of offering a second.
+  // Legacy modes allow one active evaluation. The local queue follows the explicit evaluation URL.
   useEffect(() => {
+    if (queued || params.get('eval')) return
     const ac = new AbortController()
     getCurrentEval(ac.signal).then(cur => {
       if (!cur) return
@@ -57,7 +58,7 @@ function LiveCheck() {
       else setBusyWith(cur.eval.repo)
     }).catch(() => { /* the button reports any real problem */ })
     return () => ac.abort()
-  }, [repo])
+  }, [repo, queued, params])
 
   // What to run first: the task a link named, else this harness's top recommendation, else a guess from the
   // repository's language and description.  Bowling only when the server has nothing to say.
@@ -80,7 +81,11 @@ function LiveCheck() {
 
   const start = async () => {
     setStarting(true); setProblem(null)
-    try { const s = await startEval(repo, pick); setEvalId(s.eval.id) }
+    try {
+      const s = await startEval(repo, pick)
+      setEvalId(s.eval.id)
+      navigate(`/check?repo=${encodeURIComponent(repo)}&eval=${encodeURIComponent(s.eval.id)}`, { replace: true })
+    }
     catch (e) { setProblem(e instanceof Error ? e.message : String(e)) }
     finally { setStarting(false) }
   }
@@ -102,15 +107,15 @@ function LiveCheck() {
         <div className="check-card-body">
           {why && <p className="task-why">{why}</p>}
           <p className="task-description">{excerpt ? `${excerpt}${excerpt.length >= 260 ? '…' : ''}` : ' '}</p>
-          <div className="expected-output"><span>HOW IT IS SCORED</span><code>The task’s own tests run after your agent finishes, in a container it never saw. It passes when they all pass.</code></div>
+          <div className="expected-output"><span>HOW IT IS SCORED</span><code>The task’s tests are added after your agent finishes, then run against its work in the same container.</code></div>
           {pick && <p className="flow-helper" style={{ textAlign: 'left', margin: '10px 0 0' }}>
             <Link className="text-link" to={`/tasks/${encodeURIComponent(pick.taskset)}/${encodeURIComponent(pick.task)}`}>Read the whole task</Link>
           </p>}
         </div>
         <div className="check-actions">
-          <span>{busyWith ? `${busyWith} is running now. One run at a time.` : problem || 'Runs as linux/amd64'}</span>
+          <span>{busyWith ? `${busyWith} is running now. One run at a time.` : problem || (queued ? 'Starts when a worker is available' : 'Runs as linux/amd64')}</span>
           <button className="ui-btn primary" onClick={start} disabled={starting || !!busyWith || !pick}>
-            <Icon name="play" /> {starting ? 'Starting…' : 'Run task'}
+            <Icon name="play" /> {starting ? 'Starting…' : queued ? 'Queue task' : 'Run task'}
           </button>
         </div>
       </div>
@@ -130,9 +135,11 @@ function LiveCheck() {
 }
 
 function RunningLive({ id, onFinished }: { id: string; onFinished: (id: string) => void }) {
+  const queued = ['local-queue', 'queue'].includes(useSession()?.eval_mode || '')
   const { state, events, error } = useEvaluation(id)
   const [cancelling, setCancelling] = useState(false)
   const status = state?.eval.status
+  const waiting = !status || status === 'queued'
   // exactly once: onFinished updates the flow state, which re-renders this with a new onFinished
   const finished = useRef(false)
   useEffect(() => {
@@ -145,13 +152,13 @@ function RunningLive({ id, onFinished }: { id: string; onFinished: (id: string) 
   const title = taskTitle(state?.eval.task)
   const note = error ? `Lost contact with serve.py (${error}). The run continues; retrying…`
     : stopped ? `Stopped: ${stopped}`
-    : status === 'queued' ? 'Waiting for a runner to pick it up…'
+    : status === 'queued' ? `Waiting for an available worker${state?.eval.queue_position ? ` · queue position ${state.eval.queue_position}` : ''}…`
     : last ? `${last.t ?? 0}s · ${last.stage}: ${(last.msg || '').split('\n')[0].slice(0, 160)}`
     : 'Starting run.sh…'
 
   return (
     <FlowLayout step={3}>
-      <FlowHeading step={3} title={`Running ${title}…`} text="Follow your agent’s progress. This page can be closed; the run keeps going." />
+      <FlowHeading step={3} title={!status ? 'Loading evaluation…' : waiting ? `Queued: ${title}` : `Running ${title}…`} text="Follow your agent’s progress. This page can be closed; the run keeps going." />
       {repo && <SelectedRepo repo={repo} change={false} />}
       <div className="flow-card" aria-busy={inProgress(status)}>
         <div className="check-card-header">
@@ -160,15 +167,17 @@ function RunningLive({ id, onFinished }: { id: string; onFinished: (id: string) 
         </div>
         <div className="check-progress" role="progressbar" aria-label="Run progress"
              aria-valuemin={0} aria-valuemax={LIVE_STAGES.length} aria-valuenow={completed}>
-          <div style={{ width: `${Math.max(5, (completed / LIVE_STAGES.length) * 100)}%` }} />
+          <div style={{ width: `${waiting ? 0 : Math.max(5, (completed / LIVE_STAGES.length) * 100)}%` }} />
         </div>
-        <CheckStages completed={completed} stages={LIVE_STAGES} details={details} failed={!!stopped} />
+        <CheckStages completed={completed} stages={LIVE_STAGES} details={details} failed={!!stopped} waiting={waiting} />
         <div className="live-note" role="status" aria-live="polite" style={{ overflowWrap: 'anywhere' }}>{note}</div>
         {/* the stage list says where the run is; these two say what it is doing and what it has written */}
         <LiveConsole id={id} />
-        {state?.eval.run && <LiveArtifacts run={state.eval.run} running={status === 'running'} />}
+        {!waiting && state?.eval.run && <LiveArtifacts run={state.eval.run} running={status === 'running'} />}
       </div>
       <p className="flow-helper">
+        {queued && <><Link className="text-link" to="/evaluations">Your evaluations</Link>{' · '}
+          <Link className="text-link" to="/import">Queue another task</Link>{' · '}</>}
         <button className="ui-btn small" disabled={cancelling || !inProgress(status)}
                 onClick={async () => { setCancelling(true); try { await cancelEval(id) } catch { setCancelling(false) } }}>
           {cancelling ? 'Cancelling…' : 'Cancel run'}
