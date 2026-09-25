@@ -61,6 +61,27 @@ export interface CallResponse {
   [key: string]: unknown
 }
 
+/**
+ * One line of egress.jsonl: a connection the agent's container tried to open, as the egress proxy saw it.
+ * `allowed` is the verdict, `rule` the reason for it, and `phase` says whether the agent or the verifier asked.
+ */
+export interface Egress {
+  n?: number
+  ts?: string
+  phase?: string
+  kind?: string
+  method?: string
+  host?: string
+  port?: number
+  url?: string | null
+  allowed?: boolean
+  rule?: string
+  status?: number | null
+  bytes_up?: number
+  bytes_down?: number
+  ms?: number
+}
+
 /** Per-test results parsed out of verifier/stdout.log when the verifier ran `pytest -v`. */
 export interface Tests {
   passed: number
@@ -150,6 +171,8 @@ export interface RunBundle {
   recipe: Recipe | null
   calls: Call[]
   calls_unparsed: number
+  /** every connection the container attempted; the proxy's clock, not the host's */
+  egress: Egress[]
   task: string | null
   command: string | null
   stdout: string | null

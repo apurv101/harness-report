@@ -9,24 +9,22 @@ import { FilesTab } from '../components/runs/tabs/FilesTab'
 import { LogsTab } from '../components/runs/tabs/LogsTab'
 import { RecipeTab } from '../components/runs/tabs/RecipeTab'
 import { RunJsonTab } from '../components/runs/tabs/RunJsonTab'
+import { TimelineTab } from '../components/runs/tabs/TimelineTab'
 import { TrajectoryTab } from '../components/runs/tabs/TrajectoryTab'
 import { VerifierTab } from '../components/runs/tabs/VerifierTab'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
-import { useJSON } from '../hooks/useJSON'
-import { getRun } from '../lib/api'
-import type { RunBundle } from '../lib/types'
+import { useRunBundle } from '../hooks/useRunBundle'
 
 /** One run folder, whole: what it was asked to do, what the model did, and how it was judged. */
 export function RunDetailPage() {
   const { runId = '' } = useParams()
   const [params, setParams] = useSearchParams()
-  const { data: bundle, error, reload } = useJSON<RunBundle>(
-    signal => getRun(runId, signal), [runId], 'This run could not be loaded.')
+  const { bundle, error, live, reload } = useRunBundle(runId)
 
   useDocumentTitle(bundle ? `${bundle.run} · ${bundle.run_json.harness?.name || ''}` : 'Harness Report')
 
   const crumb = <><Link to="/runs">Evaluations</Link> / {runId}</>
-  if (error) return <RunsShell crumb={crumb}><LoadError message={error} onRetry={reload} /></RunsShell>
+  if (error && !bundle) return <RunsShell crumb={crumb}><LoadError message={error} onRetry={reload} /></RunsShell>
   if (!bundle) return <RunsShell crumb={crumb}><p className="empty" role="status">Loading results…</p></RunsShell>
 
   const run = bundle.run_json
@@ -34,6 +32,8 @@ export function RunDetailPage() {
   const harbor = run.kind === 'harbor'
 
   const tabs: Tab[] = [
+    { id: 'all', label: 'Timeline', count: bundle.calls.length + (bundle.egress?.length || 0),
+      panel: () => <TimelineTab bundle={bundle} live={live} /> },
     { id: 'traj', label: 'Trajectory', panel: () => <TrajectoryTab calls={bundle.calls} /> },
     { id: 'calls', label: 'Calls', count: bundle.calls.length, panel: () => <CallsTab calls={bundle.calls} /> },
     ...(harbor ? [{ id: 'verifier', label: 'Verifier', panel: () => <VerifierTab bundle={bundle} /> }] : []),
@@ -55,6 +55,7 @@ export function RunDetailPage() {
           : '—'}
         {harness.commit && <> <span className="mono small">@ {harness.commit.slice(0, 10)}</span></>}
         {' · '}<StatusPill run={run} />
+        {live && <> · <span className="tl-live">● following, updating every 3s</span></>}
         {harbor && <>
           {' · reward '}<RewardCell run={run} />
           {(run.tests?.total || run.tests?.aborted) ? <>{' · tests '}<TestsCell tests={run.tests} /></> : null}
@@ -67,7 +68,7 @@ export function RunDetailPage() {
       <h2>{harbor ? 'Instruction' : 'Prompt'}</h2>
       <div className="task">{bundle.task || run.prompt || '(no task.txt)'}</div>
 
-      <RunTabs tabs={tabs} selected={params.get('tab') || 'traj'}
+      <RunTabs tabs={tabs} selected={params.get('tab') || 'all'}
                onSelect={id => setParams({ tab: id }, { replace: true })} />
     </RunsShell>
   )

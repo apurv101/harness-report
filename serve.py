@@ -118,19 +118,27 @@ def files_of(d):
     return files
 
 
+def jsonl(path):
+    """Every record in a .jsonl, and the count of lines too broken to parse — a half-written last line is
+    normal while the run is still going, so a bad line is counted, never fatal."""
+    out, bad = [], 0
+    for line in (read(path, "")).splitlines():
+        if not line.strip(): continue
+        try: out.append(json.loads(line))
+        except ValueError: bad += 1
+    return out, bad
+
+
 def bundle(d):
     rid = os.path.basename(d)
-    calls, bad = [], 0
-    for line in (read(os.path.join(d, "calls.jsonl"), "")).splitlines():
-        if not line.strip(): continue
-        try: calls.append(json.loads(line))
-        except ValueError: bad += 1
+    calls, bad = jsonl(os.path.join(d, "calls.jsonl"))
+    egress, _ = jsonl(os.path.join(d, "egress.jsonl"))
     files = files_of(d)
     verified = {k: read(os.path.join(d, "verifier", k)) for k in ("stdout.log", "stderr.log", "reward.txt")} if os.path.isdir(os.path.join(d, "verifier")) else None
     if verified: verified["tests"] = verifier.parse(d, full=True)
     return {"run": rid, "run_json": summary(rid),
             "recipe": load_json(os.path.join(d, "recipe.json")),
-            "calls": calls, "calls_unparsed": bad,
+            "calls": calls, "calls_unparsed": bad, "egress": egress,
             **{k.split(".")[0]: read(os.path.join(d, k)) for k in TEXT_FILES},
             "verifier": verified, "files": files, "files_omitted": 0, "source": "files", "truncated": []}
 

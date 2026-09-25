@@ -74,3 +74,25 @@
 .runs-view .empty-card p { color: var(--muted); }
 
 @media (max-width: 640px) { .runs-view { padding-top: 28px; } .runs-view .msg { grid-template-columns: 1fr; gap: 4px; } .runs-view .run-list-head { align-items: flex-start; } .runs-view .run-list-head .ui-btn { font-size: 11px; padding: 9px 11px; } .runs-view h1 { font-size: 26px; } }
+
+/* ---------------------------------------------------------------- the run timeline
+   One row per thing the run did.  The columns are fixed so the elapsed clock and the
+   numbers on the right stay in line down the page, however long a tool name runs. */
+.runs-view table.tl { table-layout: fixed; }
+.runs-view table.tl td { vertical-align: top; }
+.runs-view .tl-at { width: 62px; color: var(--muted); font-size: 12.5px; }
+.runs-view .tl-tag { width: 92px; }
+.runs-view .tl-what { overflow-wrap: anywhere; font-family: var(--mono); font-size: 13px; }
+.runs-view .tl-nums { width: 250px; white-space: nowrap; }
+.runs-view tr.tl-mark td {
+  background: var(--panel); color: var(--muted); font-family: var(--mono); font-size: 12px;
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.runs-view .tl-live { color: var(--ok); font-family: var(--mono); font-size: 12px; }
+.runs-view .tl-case { margin: 0 0 10px; }
+
+@media (max-width: 640px) {
+  .runs-view table.tl { table-layout: auto; }
+  .runs-view .tl-nums { display: none; }
+  .runs-view .tl-at, .runs-view .tl-tag { width: auto; }
+}
