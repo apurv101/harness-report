@@ -13,21 +13,35 @@ control plane will serve (RUN-PLANE.md): POST to start, GET with an event cursor
 
 Every status change is also published to the run store (lib/store.py) as EVAL#<id> — the evaluation, its stage
 events and its console log, beside the runs it produced.  Best-effort: these three files are the record.
+
+HR_EVALS picks which half of that this process is:
+
+    on      (default)  start run.sh here and follow the folder.  `python3 serve.py` on a laptop, and hr-agentd
+    queue              enqueue the lease and read progress back out of the table.  The hosted API, which has
+                       no Docker daemon and no disk — it never runs anything, it only records and reports
+    off                refuse, with a reason
+
+In queue mode the table is the record rather than a copy of one, because the process that creates an evaluation
+and the process that runs it are not the same process and share no disk.  Every reader below is written to work
+either way, so serve.py does not branch.
 """
 import json, os, re, signal, subprocess, sys, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
-import ddb, store                                  # the DynamoDB copy: the evaluation, its events, its console log
+import ddb, leases, store                           # the DynamoDB copy: the evaluation, its events, its console log
 EVALS = os.path.join(HERE, "evals")
 RUNS = os.path.join(HERE, "runs")           # run.sh always writes here
 TASKSET, TASK = "aider_polyglot", "polyglot_python_bowling"
 REPO_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
 EVAL_ID = re.compile(r"^\d{8}T\d{6}-[a-z0-9.-]{1,12}$")
 
-# run.sh needs a Docker daemon and a writable tree, so a host that has neither says so instead of
-# raising.  HR_EVALS=off is the hosted API until the run plane lands (RUN-PLANE.md).
-ENABLED = (os.environ.get("HR_EVALS") or "on").strip().lower() not in ("0", "off", "false", "no")
+# run.sh needs a Docker daemon and a writable tree.  A host with neither either hands the work to one that
+# has both (queue) or says so (off), rather than raising.
+MODE = (os.environ.get("HR_EVALS") or "on").strip().lower()
+MODE = "off" if MODE in ("0", "off", "false", "no") else MODE
+ENABLED = MODE != "off"
+QUEUED = MODE == "queue"     # this process enqueues and reports; a runner elsewhere does the work
 
 LOCK = threading.Lock()
 PROCS = {}      # eval id -> Popen, for evaluations this server process started
@@ -94,14 +108,18 @@ def _settle(ev):
 
 
 def get(eid):
-    if not EVAL_ID.match(eid or "") or not os.path.isdir(_path(eid)): return None
+    if not EVAL_ID.match(eid or ""): return None
+    if QUEUED: return store.eval_record(eid)
+    if not os.path.isdir(_path(eid)): return None
     with LOCK:
         ev = _load(eid)
         return _settle(ev) if ev else None
 
 
 def current():
-    """The evaluation still running on this machine, if any (also one started before serve.py restarted)."""
+    """The evaluation still running, if any.  In queue mode "running" includes "queued but not yet leased",
+    because one at a time has to hold across the whole fleet, not per process."""
+    if QUEUED: return store.running_eval()
     with LOCK: return _current()
 
 
@@ -115,17 +133,50 @@ def _current():
     return None
 
 
-def start(repo, user=None, token=None):
-    """Start run.sh on github.com/<repo> × the bowling task.  Raises Busy while another evaluation runs."""
+def _record(repo, eid, user, status):
+    return {"id": eid, "repo": repo, "url": f"https://github.com/{repo}", "taskset": TASKSET, "task": TASK,
+            "run": f"{eid}-{TASK}", "user": user, "status": status,
+            "started": time.strftime("%Y-%m-%dT%H:%M:%S"), "finished": None, "rc": None,
+            "cancelled": False, "error": None, "pid": None}
+
+
+def _eid(repo):
+    slug = re.sub(r"[^a-z0-9.-]", "-", repo.lower().replace("/", "-"))[:12]   # keeps hr-proxy-<run> under 63 chars
+    return time.strftime("%Y%m%dT%H%M%S") + "-" + slug
+
+
+def enqueue(repo, user=None, installation=None):
+    """Put one evaluation on the lease queue and record it as queued.  What the hosted API does instead of
+    starting anything: it owns the record, a runner owns the work.
+
+    The lease carries the installation id, never a clone token — a token in a queue is a secret sitting in a
+    queue, and the runner can mint its own from the app key it already needs for everything else."""
+    cur = store.running_eval()
+    if cur: raise Busy(cur)
+    eid = _eid(repo)
+    ev = _record(repo, eid, user, "queued")
+    store.publish_card(ev)                       # visible on the page before any runner has seen it
+    try:
+        leases.send({"eval": eid, "repo": repo, "url": ev["url"], "taskset": TASKSET, "task": TASK,
+                    "run": ev["run"], "user": user, "installation": installation})
+    except leases.Error as e:
+        ev.update(status="failed", finished=time.strftime("%Y-%m-%dT%H:%M:%S"), error=f"could not queue it: {e}")
+        store.publish_card(ev)
+        raise
+    return ev
+
+
+def start(repo, user=None, token=None, installation=None):
+    """Start run.sh on github.com/<repo> × the bowling task.  Raises Busy while another evaluation runs.
+
+    In queue mode nothing starts here; the lease goes on the queue and a runner picks it up."""
+    if QUEUED: return enqueue(repo, user=user, installation=installation)
     with LOCK:
         cur = _current()
         if cur: raise Busy(cur)
-        slug = re.sub(r"[^a-z0-9.-]", "-", repo.lower().replace("/", "-"))[:12]   # keeps hr-proxy-<run> under 63 chars
-        eid = time.strftime("%Y%m%dT%H%M%S") + "-" + slug
+        eid = _eid(repo)
         os.makedirs(_path(eid))
-        ev = {"id": eid, "repo": repo, "url": f"https://github.com/{repo}", "taskset": TASKSET, "task": TASK,
-              "run": f"{eid}-{TASK}", "user": user, "status": "running", "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
-              "finished": None, "rc": None, "cancelled": False, "error": None, "pid": None}
+        ev = _record(repo, eid, user, "running")
         env = dict(os.environ, HR_EVENTS=_path(eid, "events.jsonl"))
         env.pop("HR_GIT_TOKEN", None)
         if token: env["HR_GIT_TOKEN"] = token
@@ -145,7 +196,20 @@ def start(repo, user=None, token=None):
     return ev
 
 
+def cancel_queued(eid):
+    """Ask the runner to stop.  The API cannot signal a process it did not start and cannot see, so it writes
+    the intent onto the record and hr-agentd, which re-reads it while the run goes, does the killing.  A lease
+    still waiting in the queue is dropped by the runner the moment it leases it."""
+    ev = store.eval_record(eid)
+    if not ev: return None
+    if ev.get("status") in ("queued", "running"):
+        ev["cancelled"] = True
+        store.publish_card(ev)
+    return ev
+
+
 def cancel(eid):
+    if QUEUED: return cancel_queued(eid)
     with LOCK:
         ev = _load(eid) if EVAL_ID.match(eid or "") else None
         if not ev: return None
@@ -171,6 +235,12 @@ def console(eid, after=0):
     """run.sh's own terminal output for this evaluation, from byte `after` on.  This is the only place the fetch,
     the analyzer's turns and the docker build appear — the events are stage banners, not output — so the site reads
     it the same way it reads the call count: an offset, and whatever has been written since."""
+    if QUEUED:
+        # The runner publishes the log onto the record, trimmed to fit a row, so the offset is into that copy.
+        text = (store.eval_record(eid) or {}).get("console") or ""
+        raw = text.encode()
+        after = max(0, min(int(after or 0), len(raw)))
+        return {"text": raw[after:].decode("utf-8", "replace"), "next": len(raw), "bytes": len(raw)}
     path = _path(eid, "console.log")
     try: size = os.path.getsize(path)
     except OSError: return {"text": "", "next": 0, "bytes": 0}
@@ -182,12 +252,18 @@ def console(eid, after=0):
 
 
 def events(eid, after=0):
+    if QUEUED: return store.eval_events(eid, after)
     evs = _read_events(eid)
     return evs[after:], len(evs)
 
 
 def live(ev):
-    """Model calls so far in the evaluation's run, read incrementally from the proxy's calls.jsonl."""
+    """Model calls so far in the evaluation's run, read incrementally from the proxy's calls.jsonl.
+
+    In queue mode the file is on the runner's disk, not this one, so the runner computes exactly this dict and
+    republishes it on the record as it goes; here it is only read back."""
+    if QUEUED: return (ev or {}).get("live") or {"calls": 0, "input_tokens": 0, "output_tokens": 0,
+                                                 "errors": 0, "last_action": None}
     st = LIVE.setdefault(ev["id"], {"offset": 0, "calls": 0, "input_tokens": 0, "output_tokens": 0, "errors": 0, "last_action": None})
     try:
         with open(os.path.join(RUNS, ev["run"], "calls.jsonl"), "rb") as f:

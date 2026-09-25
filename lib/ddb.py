@@ -74,6 +74,13 @@ def credentials():
     table takes the environment first, then the named profile in ~/.aws/credentials.  SSO and credential_process
     are not resolved here — export the keys, or use a profile with static ones."""
     if local(): return LOCAL_CREDENTIALS
+    return real_credentials()
+
+
+def real_credentials():
+    """The account's own keys, never the DynamoDB Local constants.  Anything that is not DynamoDB wants these:
+    a laptop with HR_DDB=local still talks to the real SQS, and signing that with "hrlocal" fails in a way that
+    reads like a permissions problem."""
     k, s = os.environ.get("AWS_ACCESS_KEY_ID"), os.environ.get("AWS_SECRET_ACCESS_KEY")
     if k and s: return k, s, os.environ.get("AWS_SESSION_TOKEN")
     profile = os.environ.get("AWS_PROFILE") or "default"
@@ -91,12 +98,14 @@ def credentials():
 def _sign(key, msg): return hmac.new(key, msg.encode(), hashlib.sha256).digest()
 
 
-def _auth_headers(op, body, key, secret, token):
-    host = urllib.parse.urlsplit(endpoint() or f"https://dynamodb.{region()}.amazonaws.com").netloc
+def sigv4(host, service, amz_target, body, key, secret, token):
+    """Signed headers for one POST / of an x-amz-json-1.0 API.  DynamoDB and SQS differ only in the host, the
+    service name in the scope, and the target — so both go through here rather than through two copies of the
+    same eighty lines of hmac."""
     now = datetime.datetime.now(datetime.timezone.utc)
     stamp, date = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
-    ctype, amz_target = "application/x-amz-json-1.0", f"DynamoDB_20120810.{op}"
-    headers = {"content-type": ctype, "host": host, "x-amz-date": stamp, "x-amz-target": amz_target}
+    headers = {"content-type": "application/x-amz-json-1.0", "host": host,
+               "x-amz-date": stamp, "x-amz-target": amz_target}
     if token: headers["x-amz-security-token"] = token
     signed = ";".join(sorted(headers))
     # The canonical request is exact to the byte: each header line ends in a newline, then ONE blank line, then the
@@ -104,12 +113,17 @@ def _auth_headers(op, body, key, secret, token):
     # something the service will not agree with, and the only symptom is InvalidSignatureException.
     canonical = ("POST\n/\n\n" + "".join(f"{k}:{headers[k].strip()}\n" for k in sorted(headers))
                  + f"\n{signed}\n" + hashlib.sha256(body).hexdigest())
-    scope = f"{date}/{region()}/dynamodb/aws4_request"
+    scope = f"{date}/{region()}/{service}/aws4_request"
     to_sign = "\n".join(["AWS4-HMAC-SHA256", stamp, scope, hashlib.sha256(canonical.encode()).hexdigest()])
-    k = _sign(_sign(_sign(_sign(("AWS4" + secret).encode(), date), region()), "dynamodb"), "aws4_request")
+    k = _sign(_sign(_sign(_sign(("AWS4" + secret).encode(), date), region()), service), "aws4_request")
     sig = hmac.new(k, to_sign.encode(), hashlib.sha256).hexdigest()
     headers["authorization"] = (f"AWS4-HMAC-SHA256 Credential={key}/{scope}, SignedHeaders={signed}, Signature={sig}")
     return headers
+
+
+def _auth_headers(op, body, key, secret, token):
+    host = urllib.parse.urlsplit(endpoint() or f"https://dynamodb.{region()}.amazonaws.com").netloc
+    return sigv4(host, "dynamodb", f"DynamoDB_20120810.{op}", body, key, secret, token)
 
 
 # Throttling and a table that is still being created are normal, not failures; everything else is raised at once.

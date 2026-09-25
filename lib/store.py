@@ -257,18 +257,29 @@ def items_of_recipe(path):
 
 
 # ------------------------------------------------------------------ an evaluation the site started, as rows
+def eval_card(ev, n_events=0):
+    """The two rows that describe an evaluation — the list row and the META row — built from the record itself.
+
+    Separate from items_of_eval because the API has no disk: it creates an evaluation and publishes this much
+    before any runner has seen it, so the page can show a queued run that has not started."""
+    eid = ev["id"]
+    card = {**{k: v for k, v in ev.items() if k != "pid"}, "eval": eid, "events": n_events}
+    return [{**card, "pk": EVALLIST, "sk": f"EVAL#{eid}"}, fit({**card, "pk": eval_pk(eid), "sk": "META"}, ("console",))]
+
+
 def items_of_eval(eid):
+    """Everything in one evals/<id> folder: the same two card rows, plus the console text and one row per event.
+    This is the runner's side — it has the folder; the API only ever has the record."""
     d = os.path.join(EVALS, eid)
     ev = load_json(os.path.join(d, "eval.json")) or {}
     events, _ = jsonl(os.path.join(d, "events.jsonl"))
     console = os.path.join(d, "console.log")
-    card = {**{k: v for k, v in ev.items() if k != "pid"}, "eval": eid, "events": len(events)}
-    items = [{**card, "pk": EVALLIST, "sk": f"EVAL#{eid}"}]
-    meta = {**card, "pk": eval_pk(eid), "sk": "META"}
+    listed, meta = eval_card({**ev, "id": eid}, len(events))
     if os.path.exists(console):
         meta["console"], cut = text_of(console, os.path.getsize(console))
         if cut: meta["truncated"] = cut
-    items.append(fit(meta, ("console",)))
+        meta = fit(meta, ("console",))
+    items = [listed, meta]
     for n, e in enumerate(events, 1):
         items.append({**e, "pk": eval_pk(eid), "sk": run_sk(n, "EVENT")})
     return items
@@ -306,6 +317,13 @@ def publish_recipe(path):
     items = items_of_recipe(path)
     ddb.batch_put(items)
     return items[0]["recipe"], len(items)
+
+
+def publish_card(ev):
+    """One evaluation's card into the table, from the record rather than from a folder."""
+    items = eval_card(ev)
+    ddb.batch_put(items)
+    return len(items)
 
 
 def publish_eval(eid):
@@ -392,6 +410,37 @@ def run_files(rid):
     m = strip(ddb.get(run_pk(rid), "MANIFEST"))
     if not m: return None
     return {"run": rid, "files": m.get("files") or [], "files_omitted": m.get("files_omitted") or 0, "source": "table"}
+
+
+# ------------------------------------------------------------------ evaluations, read back
+
+def run_card(rid):
+    """One run's card without its calls or files — what a finished evaluation shows as its result."""
+    return strip(ddb.get(run_pk(rid), "META")) or None
+
+
+def evals_list(limit=None):
+    """Every evaluation, newest first.  Eval ids start with a timestamp, so the sort key does the ordering."""
+    return [strip(i) for i in ddb.query(EVALLIST, "EVAL#", desc=True, limit=limit)]
+
+
+def eval_record(eid):
+    """One evaluation's META row: the record, plus the console text and the live counters a runner publishes."""
+    return strip(ddb.get(eval_pk(eid), "META")) or None
+
+
+def eval_events(eid, after=0):
+    """The stage events run.sh emitted, from `after` on, and the new cursor — the same contract the folder-backed
+    reader has, so the page polls identically whichever side is answering."""
+    rows = [strip(r) for r in ddb.query(eval_pk(eid), "EVENT#")]
+    return rows[after:], len(rows)
+
+
+def running_eval():
+    """The evaluation the fleet is working on now, if any.  One at a time is enforced on the way in."""
+    for card in evals_list(limit=25):
+        if card.get("status") in ("queued", "running"): return card
+    return None
 
 
 def file_text(rid, name):

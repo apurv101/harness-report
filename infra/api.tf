@@ -66,11 +66,21 @@ data "aws_iam_policy_document" "api" {
     resources = ["${aws_cloudwatch_log_group.api.arn}:*"]
   }
 
-  # Read-only against the run store, plus the session rows the site writes.  No UpdateItem anywhere,
-  # which is the store's own rule (lib/store.py) and not an accident of this policy.
+  # Reads against the run store, plus the rows the site itself writes: sessions, and the card for an evaluation
+  # it has queued.  No UpdateItem — that is the store's own rule (lib/store.py), not an accident of this policy.
+  # BatchWriteItem is not optional despite the small writes: store.publish_card batches its two rows, and
+  # auth._drop deletes a session partition the same way, so without it signing out fails quietly.
   statement {
-    sid       = "RunStore"
-    actions   = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem", "dynamodb:DeleteItem"]
+    sid = "RunStore"
+    actions = [
+      # DescribeTable is not bookkeeping: store.available() is how serve.py decides whether to answer from the
+      # table or from run folders, and it asks by describing the table.  Denied, it throws, the throw is caught,
+      # and the API quietly serves the empty list of folders a Lambda does not have — a permissions gap that
+      # looks exactly like an empty table.
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem", "dynamodb:Query",
+      "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:BatchWriteItem",
+    ]
     resources = [aws_dynamodb_table.store.arn, "${aws_dynamodb_table.store.arn}/index/*"]
   }
 
@@ -78,6 +88,14 @@ data "aws_iam_policy_document" "api" {
     sid       = "Secrets"
     actions   = ["ssm:GetParametersByPath", "ssm:GetParameter", "ssm:GetParameters"]
     resources = ["arn:aws:ssm:${var.region}:${local.account}:parameter/${local.name}/*"]
+  }
+
+  # Enqueue only.  The API puts work on the queue and never takes any off: consuming a lease is the runner's
+  # business, and a control plane able to drain its own queue can quietly lose a run.
+  statement {
+    sid       = "Enqueue"
+    actions   = ["sqs:SendMessage", "sqs:GetQueueAttributes"]
+    resources = [aws_sqs_queue.leases.arn]
   }
 
   statement {
@@ -114,8 +132,9 @@ resource "aws_lambda_function" "api" {
       HR_ORIGIN_SECRET = random_password.origin.result
       HR_SECRET_PREFIX = "/${local.name}/"
       HR_TABLE         = var.table_name
-      HR_SESSIONS      = "ddb" # sessions are rows, not .auth/sessions.json — Lambda has no disk to share
-      HR_EVALS         = "off" # POST /api/evals needs a Docker daemon; it comes back with the run plane
+      HR_SESSIONS      = "ddb"   # sessions are rows, not .auth/sessions.json — Lambda has no disk to share
+      HR_EVALS         = "queue" # record it and enqueue it; a runner with a Docker daemon does the work
+      HR_QUEUE_URL     = aws_sqs_queue.leases.url
       HR_RUNS_BUCKET   = aws_s3_bucket.runs.bucket
       BASE_URL         = "https://${local.host}"
       GITHUB_CLIENT_ID = var.github_client_id

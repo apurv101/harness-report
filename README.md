@@ -194,9 +194,34 @@ verifier, recipe, logs, and files. The selected tab is a `?tab=` query, so it su
 Older `#runs/<id>` hashes and `/<run-id>` paths are rewritten to the current form on load.
 `/api/runs`, `/api/run/<run-id>`, and `/raw/<run-id>/<file>` provide the underlying data.
 
-**Runs from the site.** Served by `serve.py`, step 3's "Run task" is real: `evals.py` starts `run.sh` on the
-chosen repository and the `aider_polyglot` bowling task, **one at a time** on this machine (a second start gets a
-409 naming the running one). With `HR_EVENTS` set, `run.sh` appends one JSON line per stage, recipe decision, run
+**Runs from the site.** Step 3's "Run task" is real, and `HR_EVALS` decides who does the work:
+
+| `HR_EVALS` | what `POST /api/evals` does | who sets it |
+|---|---|---|
+| `on` (default) | start `run.sh` here and follow the folder | `python3 serve.py` on a laptop |
+| `queue` | record the evaluation, put a lease on SQS, report from the table | the hosted API, which has no Docker daemon |
+| `off` | refuse, with a reason | — |
+
+In queue mode [`hr-agentd`](hr-agentd) is the other half: it leases from the queue, runs the same `run.sh`, and
+republishes the record as it goes, so a page polling the hosted API sees stages, console output and the live
+call count while they happen. The queue is the entire coupling — the API never learns where a run happens and
+the runner never learns who asked — which is what lets the runner sit on a laptop today and on an EC2 runner
+later without either side changing ([RUN-PLANE.md](RUN-PLANE.md)).
+
+```sh
+export HR_QUEUE_URL=$(terraform -chdir=infra output -raw lease_queue_url)
+export HR_TABLE=harness-report HR_DDB= AWS_PROFILE=operator
+./hr-agentd --status      # what is queued, and what the table thinks is running
+./hr-agentd               # lease and run, forever
+```
+
+`AWS_PROFILE` is the daemon's own credentials, for the queue and the table. `HR_RUN_PROFILE` is the profile the
+*model* call uses when it differs — unset, `run.sh` reads it from `.env`, which is also what an EC2 runner wants
+since there the instance role is both. Without that split the daemon's profile is inherited into `lib/proxy.sh`,
+which forwards it to the proxy container, and every model call goes out as the control plane.
+
+Either way it is **one at a time** (a second start gets a 409 naming the running one) — in queue mode that holds
+across the fleet, because the check is a query against the table rather than a look at this process. With `HR_EVENTS` set, `run.sh` appends one JSON line per stage, recipe decision, run
 folder, result and error; the page polls `GET /api/evals/<id>?after=<n>` every 1.5 s for those events plus the live
 model-call count read from the run's `calls.jsonl`, then shows the real result. A private repository is cloned with a
 short-lived GitHub App installation token that reaches git only through its environment. Cancel sends SIGTERM to

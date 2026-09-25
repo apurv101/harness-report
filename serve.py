@@ -41,7 +41,7 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import unquote, parse_qs, urlsplit
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-import auth, ddb, evals, store, verifier
+import auth, ddb, evals, leases, store, verifier
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.abspath(os.path.join(HERE, "web", "dist"))     # the built frontend
@@ -200,11 +200,17 @@ class H(SimpleHTTPRequestHandler):
 
     def eval_state(self, ev, after):
         """What the site polls: the evaluation, run.sh's events from `after` on, the live calls, and the run's
-        summary (reward, tests, calls) once it has finished."""
+        summary (reward, tests, calls) once it has finished.
+
+        The result comes from the run folder when this machine has one and from the table when it does not, the
+        same way /api/runs does — a run produced on a runner is a row here, never a folder."""
         evs, nxt = evals.events(ev["id"], after)
-        done = ev["status"] != "running" and find_run(ev["run"])
+        finished = ev["status"] not in ("queued", "running")
+        result = None
+        if finished:
+            result = summary(ev["run"]) if find_run(ev["run"]) else from_table(store.run_card, ev["run"])
         return {"eval": {k: v for k, v in ev.items() if k != "pid"}, "events": evs, "next": nxt,
-                "live": evals.live(ev), "result": summary(ev["run"]) if done else None}
+                "live": evals.live(ev), "result": result}
 
     def eval_console(self, eid, q):
         """The evaluation's console log: JSON with a byte cursor for the live view, or text/plain to open it whole."""
@@ -228,21 +234,27 @@ class H(SimpleHTTPRequestHandler):
             return self.json(200, self.eval_state(ev, after))
         return self.json(404, {"error": "no such api route"})
 
-    def clone_token(self, sess, repo):
-        """A short-lived clone token when the signed-in user's GitHub App installations grant this repo and it is
-        private.  None for a public repo (cloned anonymously).  PermissionError for a private repo we cannot reach."""
-        if not sess or not auth.can_clone(): return None
+    def installation_of(self, sess, repo):
+        """Which of the signed-in user's installations grants this repository, and whether it is private.
+        (None, False) when nothing does — a public repo is cloned anonymously and needs neither."""
+        if not sess or not auth.can_clone(): return None, False
         for inst in auth.installations(sess):
             for r in auth.repositories(sess, inst["id"]):
                 if r["name"].lower() == repo.lower():
-                    return auth.clone_token(inst["id"])[0] if r["private"] else None
-        return None
+                    return inst["id"], bool(r["private"])
+        return None, False
+
+    def clone_token(self, sess, repo):
+        """A short-lived clone token when the signed-in user's GitHub App installations grant this repo and it is
+        private.  None for a public repo (cloned anonymously).  PermissionError for a private repo we cannot reach."""
+        inst, private = self.installation_of(sess, repo)
+        return auth.clone_token(inst)[0] if (inst and private) else None
 
     def do_POST(self):
         path = self.path.partition("?")[0]
         parts = [unquote(p) for p in path.strip("/").split("/") if p]
         if parts[:2] != ["api", "evals"]: return self.json(404, {"error": "no such api route"})
-        if not evals.ENABLED: return self.json(503, {"error": "this server does not start runs; runs come from the run plane"})
+        if not evals.ENABLED: return self.json(503, {"error": "this server does not start runs"})
         # The site's own pages only: a cross-site form or fetch carries another Origin (and cannot send JSON without CORS)
         origin = self.headers.get("Origin")
         if origin and urlsplit(origin).netloc != self.headers.get("Host"): return self.json(403, {"error": "cross-origin request"})
@@ -254,10 +266,16 @@ class H(SimpleHTTPRequestHandler):
         if parts[2:] == []:
             repo = str(body.get("repo") or "").strip().removesuffix(".git")
             if not evals.REPO_NAME.match(repo): return self.json(400, {"error": "repo must look like owner/name"})
-            try: token = self.clone_token(sess, repo)
-            except RuntimeError as e: return self.json(502, {"error": f"could not get a clone token from GitHub: {e}"})
-            try: ev = evals.start(repo, user=(auth.public(sess) or {}).get("login"), token=token)
+            # A queued run is handed to a runner, which mints its own token from the app key; only a run started
+            # here needs one now.  Either way the token never travels through the queue.
+            try:
+                inst, private = self.installation_of(sess, repo)
+                token = None if evals.QUEUED else (auth.clone_token(inst)[0] if (inst and private) else None)
+            except RuntimeError as e: return self.json(502, {"error": f"could not reach GitHub: {e}"})
+            try: ev = evals.start(repo, user=(auth.public(sess) or {}).get("login"), token=token,
+                                  installation=inst if private else None)
             except evals.Busy as b: return self.json(409, {"error": f"{b.eval['repo']} is already running; one evaluation at a time", "eval": b.eval["id"]})
+            except leases.Error as e: return self.json(503, {"error": f"the run queue is not reachable: {e}"})
             return self.json(201, self.eval_state(ev, 0))
         if len(parts) == 4 and parts[3] == "cancel":
             ev = evals.cancel(parts[2])

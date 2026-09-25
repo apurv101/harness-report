@@ -36,8 +36,8 @@ output "ecr_overlay" { value = aws_ecr_repository.overlay.repository_url }
 output "ecr_proxy" { value = aws_ecr_repository.proxy.repository_url }
 
 output "lease_queue_url" {
-  description = "Empty until enable_run_plane is true."
-  value       = try(aws_sqs_queue.leases[0].url, "")
+  description = "Where the API puts evaluations and hr-agentd takes them.  Export it as HR_QUEUE_URL."
+  value       = aws_sqs_queue.leases.url
 }
 
 output "secrets_to_fill" {

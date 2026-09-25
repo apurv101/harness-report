@@ -12,27 +12,6 @@ locals {
   runner = var.enable_run_plane ? 1 : 0
 }
 
-resource "aws_sqs_queue" "leases_dlq" {
-  count                     = local.runner
-  name                      = "${local.name}-leases-dlq"
-  message_retention_seconds = 1209600
-}
-
-resource "aws_sqs_queue" "leases" {
-  count = local.runner
-  name  = "${local.name}-leases"
-
-  # A session lease is (user, repo@commit, taskset, tasks, k).  The longest measured agent run is
-  # 1192 s; the visibility timeout has to outlast the whole session, not one task.
-  visibility_timeout_seconds = 3600
-  message_retention_seconds  = 86400
-
-  redrive_policy = jsonencode({
-    deadLetterTargetArn = aws_sqs_queue.leases_dlq[0].arn
-    maxReceiveCount     = 3
-  })
-}
-
 # ---------------------------------------------------------------- the runner's identity
 
 data "aws_iam_policy_document" "runner_assume" {
@@ -51,7 +30,7 @@ data "aws_iam_policy_document" "runner" {
   statement {
     sid       = "Leases"
     actions   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:ChangeMessageVisibility", "sqs:GetQueueAttributes"]
-    resources = [aws_sqs_queue.leases[0].arn]
+    resources = [aws_sqs_queue.leases.arn]
   }
 
   statement {
@@ -206,7 +185,7 @@ resource "aws_launch_template" "runner" {
 
   user_data = base64encode(templatefile("${path.module}/runner-init.sh", {
     region         = var.region
-    queue_url      = aws_sqs_queue.leases[0].url
+    queue_url      = aws_sqs_queue.leases.url
     runs_bucket    = aws_s3_bucket.runs.bucket
     recipes_bucket = aws_s3_bucket.recipes.bucket
     table          = var.table_name
