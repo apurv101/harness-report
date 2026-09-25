@@ -381,7 +381,17 @@ def run_bundle(rid):
             **{short: (files.get(name) or {}).get("text") for name, short in BUNDLE_KEYS.items()},
             "verifier": {**verifier_out, "tests": tests} if manifest.get("has_verifier") else None,
             "files": manifest.get("files") or [], "files_omitted": manifest.get("files_omitted") or 0,
-            "egress": [strip(r) for r in rows if r["sk"].startswith("EGRESS#")]}
+            "egress": [strip(r) for r in rows if r["sk"].startswith("EGRESS#")],
+            # Where this answer came from, and which of the files in it lost bytes to the 400 KB item limit — a page
+            # showing a cut log has to be able to say so, and to link the whole file.
+            "source": "table", "truncated": sorted(n for n, r in files.items() if r.get("truncated"))}
+
+
+def run_files(rid):
+    """Just the file list — one GetItem, for a page that polls "what has this run written so far"."""
+    m = strip(ddb.get(run_pk(rid), "MANIFEST"))
+    if not m: return None
+    return {"run": rid, "files": m.get("files") or [], "files_omitted": m.get("files_omitted") or 0, "source": "table"}
 
 
 def file_text(rid, name):

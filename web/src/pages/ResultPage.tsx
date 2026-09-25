@@ -4,6 +4,7 @@ import { SelectedRepo } from '../components/onboarding/SelectedRepo'
 import { Icon } from '../components/ui/Icon'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useEvaluation } from '../hooks/useEvaluation'
+import { evalConsoleURL } from '../lib/api'
 import { BOWLING, progress } from '../lib/evaluation'
 import { FIZZBUZZ_OUTPUT } from '../lib/preview'
 import { usePreview } from '../state/PreviewContext'
@@ -74,6 +75,7 @@ function LiveResult({ id }: { id: string }) {
       </div>
       <div className="result-links">
         {r && <Link className="text-link" to={`/runs/${encodeURIComponent(ev.run)}`}>Open the full run</Link>}
+        <a className="text-link" href={evalConsoleURL(id)} target="_blank" rel="noopener">Console log</a>
         <button onClick={() => { setEval(null); navigate('/check') }}>Run again</button>
         <Link to="/import" className="text-link">Choose another harness</Link>
       </div>

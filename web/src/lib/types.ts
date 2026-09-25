@@ -157,6 +157,30 @@ export interface RunBundle {
   proxy: string | null
   verifier: Verifier | null
   files: RunFile[]
+  /** files past the stored manifest's cap (0 when the folder was read directly) */
+  files_omitted: number
+  /** where this answer came from: the run folder, or the DynamoDB rows */
+  source: 'files' | 'table'
+  /** names whose stored text lost bytes to the item limit — open the raw file for the whole thing */
+  truncated: string[]
+}
+
+/** GET /api/run/<run-id>/files — the cheap poll while a run is still writing. */
+export interface RunFiles {
+  run: string
+  files: RunFile[]
+  files_omitted: number
+  source: 'files' | 'table'
+}
+
+/** GET /api/evals/<id>/console — run.sh's own output from a byte cursor on. */
+export interface EvalConsole {
+  text: string
+  /** the byte to ask from next time */
+  next: number
+  /** the log's size on disk */
+  bytes: number
+  status: EvalStatus
 }
 
 /** /api/me — whether sign-in is configured at all, and who is signed in. */

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { CheckStages } from '../components/onboarding/CheckStages'
 import { FlowHeading, FlowLayout } from '../components/onboarding/FlowLayout'
+import { LiveArtifacts } from '../components/onboarding/LiveArtifacts'
+import { LiveConsole } from '../components/onboarding/LiveConsole'
 import { SelectedRepo } from '../components/onboarding/SelectedRepo'
 import { Icon } from '../components/ui/Icon'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
@@ -111,6 +113,9 @@ function RunningLive({ id, onFinished }: { id: string; onFinished: (id: string) 
         </div>
         <CheckStages completed={completed} stages={LIVE_STAGES} details={details} failed={!!stopped} />
         <div className="live-note" role="status" aria-live="polite" style={{ overflowWrap: 'anywhere' }}>{note}</div>
+        {/* the stage list says where the run is; these two say what it is doing and what it has written */}
+        <LiveConsole id={id} />
+        {state?.eval.run && <LiveArtifacts run={state.eval.run} running={status === 'running'} />}
       </div>
       <p className="flow-helper">
         <button className="ui-btn small" disabled={cancelling || status !== 'running'}

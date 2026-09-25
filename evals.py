@@ -163,6 +163,20 @@ def _read_events(eid):
     return out
 
 
+def console(eid, after=0):
+    """run.sh's own terminal output for this evaluation, from byte `after` on.  This is the only place the fetch,
+    the analyzer's turns and the docker build appear — the events are stage banners, not output — so the site reads
+    it the same way it reads the call count: an offset, and whatever has been written since."""
+    path = _path(eid, "console.log")
+    try: size = os.path.getsize(path)
+    except OSError: return {"text": "", "next": 0, "bytes": 0}
+    after = max(0, min(int(after or 0), size))
+    with open(path, "rb") as f:
+        f.seek(after); chunk = f.read()
+    # A read can land mid-character while run.sh is writing; the replacement char is better than a failed poll.
+    return {"text": chunk.decode("utf-8", "replace"), "next": after + len(chunk), "bytes": size}
+
+
 def events(eid, after=0):
     evs = _read_events(eid)
     return evs[after:], len(evs)

@@ -14,6 +14,7 @@ export function FilesTab({ bundle }: { bundle: RunBundle }) {
               <td className="mono">
                 <a href={rawFileURL(bundle.run, file.name)} target="_blank" rel="noopener">{file.name}</a>
                 {!file.core && <span className="muted small"> (written by the harness)</span>}
+                {bundle.truncated?.includes(file.name) && <span className="muted small"> · stored head and tail only</span>}
               </td>
               <td className="num">{kb(file.bytes)}</td>
               <td className="small muted">{file.core ? '' : 'raw'}</td>
@@ -21,7 +22,16 @@ export function FilesTab({ bundle }: { bundle: RunBundle }) {
           ))}
         </tbody>
       </table>
-      <p className="muted small">Folder: <code>runs/{bundle.run}/</code></p>
+      {bundle.files_omitted > 0 && (
+        <p className="muted small">
+          {bundle.files_omitted.toLocaleString()} more files are in the folder but not in the stored list — the
+          harness wrote its own home directory into <code>/out</code>.
+        </p>
+      )}
+      <p className="muted small">
+        Folder: <code>runs/{bundle.run}/</code>
+        {' · '}listed from {bundle.source === 'table' ? 'the run store (DynamoDB)' : 'the folder itself'}
+      </p>
     </>
   )
 }

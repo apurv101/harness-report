@@ -12,6 +12,7 @@ URLs
     /<run-id>                      legacy run link (opens the same frontend)
     /api/runs                      JSON list of runs (summary of each run.json)
     /api/run/<run-id>              JSON bundle: run.json, task, command, recipe, calls[], logs, files[]
+    /api/run/<run-id>/files        just the file list, cheap enough to poll while the run is still writing
                                    both come from the DynamoDB table when one answers (lib/store.py, --store),
                                    and from the run folders when it does not — the same JSON either way
     /raw/<run-id>/<file>           a file from the run folder as-is
@@ -22,6 +23,7 @@ URLs
     POST /api/evals {"repo": "owner/name"}  start run.sh on that repo × the bowling task (one at a time; 409 if busy)
     /api/evals/current             the evaluation running now, or null
     /api/evals/<id>?after=<n>      follow one: its status, events from n on, live model calls, and the result when done
+    /api/evals/<id>/console?after=<bytes>   run.sh's own terminal output from that byte on (&format=text for the whole log)
     POST /api/evals/<id>/cancel    stop it (run.sh removes its containers on the way out)
 
 The frontend is the React app in web/; `npm --prefix web run build` writes web/dist, and everything under
@@ -103,6 +105,19 @@ def summary(rid):
     return out
 
 
+def files_of(d):
+    """Every file in a run folder, by name: what the Files tab lists, and what a run in flight is polled for."""
+    files = []
+    for root, _, fs in os.walk(d):
+        for f in fs:
+            p = os.path.join(root, f); rel = os.path.relpath(p, d)
+            try: size = os.path.getsize(p)
+            except OSError: continue       # a harness can leave a dangling symlink behind (claude-config/debug/latest)
+            files.append({"name": rel, "bytes": size, "core": rel in CORE})
+    files.sort(key=lambda x: x["name"])
+    return files
+
+
 def bundle(d):
     rid = os.path.basename(d)
     calls, bad = [], 0
@@ -110,21 +125,14 @@ def bundle(d):
         if not line.strip(): continue
         try: calls.append(json.loads(line))
         except ValueError: bad += 1
-    files = []
-    for root, _, fs in os.walk(d):
-        for f in sorted(fs):
-            p = os.path.join(root, f); rel = os.path.relpath(p, d)
-            try: size = os.path.getsize(p)
-            except OSError: continue       # a harness can leave a dangling symlink behind (claude-config/debug/latest)
-            files.append({"name": rel, "bytes": size, "core": rel in CORE})
-    files.sort(key=lambda x: x["name"])
+    files = files_of(d)
     verified = {k: read(os.path.join(d, "verifier", k)) for k in ("stdout.log", "stderr.log", "reward.txt")} if os.path.isdir(os.path.join(d, "verifier")) else None
     if verified: verified["tests"] = verifier.parse(d, full=True)
     return {"run": rid, "run_json": summary(rid),
             "recipe": load_json(os.path.join(d, "recipe.json")),
             "calls": calls, "calls_unparsed": bad,
             **{k.split(".")[0]: read(os.path.join(d, k)) for k in TEXT_FILES},
-            "verifier": verified, "files": files}
+            "verifier": verified, "files": files, "files_omitted": 0, "source": "files", "truncated": []}
 
 
 class H(SimpleHTTPRequestHandler):
@@ -190,10 +198,20 @@ class H(SimpleHTTPRequestHandler):
         return {"eval": {k: v for k, v in ev.items() if k != "pid"}, "events": evs, "next": nxt,
                 "live": evals.live(ev), "result": summary(ev["run"]) if done else None}
 
+    def eval_console(self, eid, q):
+        """The evaluation's console log: JSON with a byte cursor for the live view, or text/plain to open it whole."""
+        ev = evals.get(eid)
+        if not ev: return self.json(404, {"error": "no such evaluation"})
+        out = evals.console(eid, int((q.get("after") or ["0"])[0] or 0))
+        if (q.get("format") or [""])[0] == "text":
+            return self.send(200, evals.console(eid, 0)["text"], "text/plain; charset=utf-8")
+        return self.json(200, {**out, "status": ev["status"]})
+
     def evals_get(self, parts, q):
         if parts == ["current"]:
             ev = evals.current()
             return self.json(200, self.eval_state(ev, 0) if ev else None)
+        if len(parts) == 2 and parts[1] == "console": return self.eval_console(parts[0], q)
         if len(parts) == 1:
             ev = evals.get(parts[0])
             if not ev: return self.json(404, {"error": "no such evaluation"})
@@ -248,9 +266,17 @@ class H(SimpleHTTPRequestHandler):
                                                             "install_url": "/auth/install" if auth.install_url() else "", "can_clone": auth.can_clone()})
             if parts[1:] == ["runs"]:
                 return self.json(200, from_table(store.runs_list) or [summary(r) for r in run_dirs()])
+            if parts[1:2] == ["run"] and len(parts) == 4 and parts[3] == "files":
+                # what the run has written so far: the folder while it is being written, the stored manifest after
+                d = find_run(parts[2])
+                if d: return self.json(200, {"run": parts[2], "files": files_of(d), "files_omitted": 0, "source": "files"})
+                listed = from_table(store.run_files, parts[2])
+                return self.json(200, listed) if listed else self.json(404, {"error": "no such run"})
             if parts[1:2] == ["run"] and len(parts) == 3:
                 b = from_table(store.run_bundle, parts[2])
-                if b: return self.json(200, b)
+                # A run still being written is read from the folder it is being written into: the table has its card
+                # from the moment it starts, but the calls, the logs and the files are only published at the end.
+                if b and (b["run_json"].get("finished") or not find_run(parts[2])): return self.json(200, b)
                 d = find_run(parts[2])
                 return self.json(200, bundle(d)) if d else self.json(404, {"error": "no such run"})
             if parts[1:2] == ["github"]:
