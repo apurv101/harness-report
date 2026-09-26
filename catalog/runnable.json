@@ -412,6 +412,226 @@
     {
       "taskset": "spreadsheetbench-verified",
       "task": "11276"
+    },
+    {
+      "taskset": "gaia",
+      "task": "05407167-39ec-4d3a-a234-73a9120c325d"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s13"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-13"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "103"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t26-f3-4"
+    },
+    {
+      "taskset": "gaia",
+      "task": "076c8171-9b3b-49b9-a477-244d2a532826"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-007"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "118-50"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s14"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-14"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "104"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-008"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "11842"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t27-f1-2"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "caffe-cifar-10"
+    },
+    {
+      "taskset": "gaia",
+      "task": "08c0b6e9-1b43-4c2e-ae55-4e3fce2c2715"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "cancel-async-tasks"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s15"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-15"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "105"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t27-f1-3"
+    },
+    {
+      "taskset": "gaia",
+      "task": "08cae58d-4084-4616-b6dd-dd6534e4825b"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-009"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "120-24"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "chess-best-move"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s16"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-16"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "106"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-010"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t27-f1-4"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "12307"
+    },
+    {
+      "taskset": "gaia",
+      "task": "08f3a05f-5947-4089-a4c4-d4bcfaa6b7a0"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s17"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-17"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "circuit-fibsqrt"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "107"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-011"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "12864"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t27-f2-3"
+    },
+    {
+      "taskset": "gaia",
+      "task": "0a3cd321-3e76-4622-911b-0fda2e5d6b1a"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "cobol-modernization"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s18"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-18"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "108"
+    },
+    {
+      "taskset": "gaia",
+      "task": "0a65cb96-cb6e-4a6a-8aae-c1084f613456"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-012"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "code-from-image"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t27-f2-4"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "13-1"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s19"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-19"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "109"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-013"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t27-f3-4"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "130-9"
     }
   ]
 }
