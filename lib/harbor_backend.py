@@ -249,11 +249,6 @@ async def execute_trial(args, project, gateway):
     config, no_proxy = runtime_compose(original, image=args.image, project=project,
         evaluation=os.environ.get("HR_LOCAL_EVAL_ID", ""), network=gateway,
         proxy=args.proxy, egress=args.egress, out=out)
-    staged = work / "task"
-    stage_task(args.task.resolve(), staged, args.image, config)
-    runtime_path = staged / "environment/docker-compose.yaml"
-    # Build sidecars before Trial selects its prebuilt main image.
-    await compose_command(runtime_path, project, "build")
     recipe = json.loads(args.recipe.read_text()) if args.recipe else None
     bridge_env = {}
     if recipe:
@@ -266,9 +261,24 @@ async def execute_trial(args, project, gateway):
             if args.egress == "inspect":
                 for key in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO"):
                     bridge_env[key] = "/hr-ca.pem"
+    wrapper = args.wrapper
+    import toml
+    task_config = toml.load(args.task / "task.toml")
+    mcp_servers = task_config.get("environment", {}).get("mcp_servers", [])
+    if any(s.get("transport") != "streamable-http" for s in mcp_servers):
+        raise ValueError("Task MCP bridge currently supports streamable-http servers")
+    if task_config.get("source") == "cooperbench":
+        from cooperbench import configure
+        wrapper = configure(config, task=args.task, work=work, out=out, image=args.image,
+                            wrapper=wrapper, env=bridge_env, oracle=args.oracle)
+    staged = work / "task"
+    stage_task(args.task.resolve(), staged, args.image, config)
+    runtime_path = staged / "environment/docker-compose.yaml"
+    # Build sidecars before Trial selects its prebuilt main image.
+    await compose_command(runtime_path, project, "build")
     bridge = work / "bridge.json"
-    bridge.write_text(json.dumps({"wrapper": str(args.wrapper.resolve()) if args.wrapper else None,
-        "out": str(out), "workdir": args.workdir, "env": bridge_env}))
+    bridge.write_text(json.dumps({"wrapper": str(wrapper.resolve()) if wrapper else None,
+        "out": str(out), "workdir": args.workdir, "env": bridge_env, "mcp_servers": mcp_servers}))
     agent = {"name": "oracle"} if args.oracle else {"import_path": "harbor_agent:RecipeAgent", "kwargs": {"bridge_file": str(bridge)}}
     trial = await Trial.create(TrialConfig.model_validate({"task": {"path": str(staged)},
         "trial_name": project, "trials_dir": str(work / "trials"), "agent": agent,

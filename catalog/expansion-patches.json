@@ -1,0 +1,236 @@
+[
+  {
+    "taskset": "kumo",
+    "task": "algorithmenv-t4-a6-v1-s0",
+    "file": "tests/score.py",
+    "change": "Move descriptive scoring metadata to result.json; preserve test.sh scalar reward.txt and the exact-match scorer.",
+    "before_sha256": "14164f5af98832e9e800ed51789b87d6e883b1a73a01fbee197c3222324ed33c",
+    "after_sha256": "34c2f48ec5c14aeec639028a15a75fec2ad765ce929df319d9c01339d3c2888b",
+    "replace": {
+      "old": "Path(\"/logs/verifier/reward.json\")",
+      "new": "Path(\"/logs/verifier/result.json\")"
+    },
+    "path": "datasets/kumo/algorithmenv-t4-a6-v1-s0/tests/score.py"
+  },
+  {
+    "taskset": "kumo",
+    "task": "mythicenv-t4-a6-v1-s30",
+    "file": "tests/score.py",
+    "change": "Move descriptive scoring metadata to result.json; preserve test.sh scalar reward.txt and the exact-match scorer.",
+    "before_sha256": "14164f5af98832e9e800ed51789b87d6e883b1a73a01fbee197c3222324ed33c",
+    "after_sha256": "34c2f48ec5c14aeec639028a15a75fec2ad765ce929df319d9c01339d3c2888b",
+    "replace": {
+      "old": "Path(\"/logs/verifier/reward.json\")",
+      "new": "Path(\"/logs/verifier/result.json\")"
+    },
+    "path": "datasets/kumo/mythicenv-t4-a6-v1-s30/tests/score.py"
+  },
+  {
+    "taskset": "kumo",
+    "task": "cryptographyenv-t4-a6-v1-s0",
+    "file": "tests/score.py",
+    "change": "Move descriptive scoring metadata to result.json; preserve test.sh scalar reward.txt and the exact-match scorer.",
+    "before_sha256": "14164f5af98832e9e800ed51789b87d6e883b1a73a01fbee197c3222324ed33c",
+    "after_sha256": "34c2f48ec5c14aeec639028a15a75fec2ad765ce929df319d9c01339d3c2888b",
+    "replace": {
+      "old": "Path(\"/logs/verifier/reward.json\")",
+      "new": "Path(\"/logs/verifier/result.json\")"
+    },
+    "path": "datasets/kumo/cryptographyenv-t4-a6-v1-s0/tests/score.py"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-0",
+    "file": "environment/Dockerfile",
+    "change": "Pin tau2 runtime to the recorded original dataset-generation commit; avoid drift from upstream HEAD.",
+    "before_sha256": "1863ddddaf284b73f96af00b070f5dfe3cb42f7602ac516a3def590f79ccbd8a",
+    "after_sha256": "89304ac654ecd15fe08dc30ddd90ce61eb8942af028c85f973316ce49a84345e",
+    "replace": {
+      "old": "git clone --depth=1 \"${TAU2_BENCH_REPO}\" \"${TAU2_BENCH_ROOT}\"",
+      "new": "git init \"${TAU2_BENCH_ROOT}\" && git -C \"${TAU2_BENCH_ROOT}\" remote add origin \"${TAU2_BENCH_REPO}\" && git -C \"${TAU2_BENCH_ROOT}\" fetch --depth=1 origin 2174a603f6d014ef94473ffa95957f6ce27100db && git -C \"${TAU2_BENCH_ROOT}\" checkout --detach FETCH_HEAD"
+    },
+    "path": "tau3-bench/tau3-retail-0/environment/Dockerfile"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-0",
+    "file": "environment/runtime-server/Dockerfile",
+    "change": "Pin tau2 runtime to the recorded original dataset-generation commit; avoid drift from upstream HEAD.",
+    "before_sha256": "c90db88f3c20176a3128e6ffccb3888dcf58c7382fd962abfdf7011a8cbcdcd9",
+    "after_sha256": "889b4bbfdebf836d008ace1a295d1ffaaf031a9938d1759b06bb4aa2e982f150",
+    "replace": {
+      "old": "git clone --depth=1 \"${TAU2_BENCH_REPO}\" \"${TAU2_BENCH_ROOT}\"",
+      "new": "git init \"${TAU2_BENCH_ROOT}\" && git -C \"${TAU2_BENCH_ROOT}\" remote add origin \"${TAU2_BENCH_REPO}\" && git -C \"${TAU2_BENCH_ROOT}\" fetch --depth=1 origin 2174a603f6d014ef94473ffa95957f6ce27100db && git -C \"${TAU2_BENCH_ROOT}\" checkout --detach FETCH_HEAD"
+    },
+    "path": "tau3-bench/tau3-retail-0/environment/runtime-server/Dockerfile"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-1",
+    "file": "environment/Dockerfile",
+    "change": "Pin tau2 runtime to the recorded original dataset-generation commit; avoid drift from upstream HEAD.",
+    "before_sha256": "1863ddddaf284b73f96af00b070f5dfe3cb42f7602ac516a3def590f79ccbd8a",
+    "after_sha256": "89304ac654ecd15fe08dc30ddd90ce61eb8942af028c85f973316ce49a84345e",
+    "replace": {
+      "old": "git clone --depth=1 \"${TAU2_BENCH_REPO}\" \"${TAU2_BENCH_ROOT}\"",
+      "new": "git init \"${TAU2_BENCH_ROOT}\" && git -C \"${TAU2_BENCH_ROOT}\" remote add origin \"${TAU2_BENCH_REPO}\" && git -C \"${TAU2_BENCH_ROOT}\" fetch --depth=1 origin 2174a603f6d014ef94473ffa95957f6ce27100db && git -C \"${TAU2_BENCH_ROOT}\" checkout --detach FETCH_HEAD"
+    },
+    "path": "tau3-bench/tau3-retail-1/environment/Dockerfile"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-1",
+    "file": "environment/runtime-server/Dockerfile",
+    "change": "Pin tau2 runtime to the recorded original dataset-generation commit; avoid drift from upstream HEAD.",
+    "before_sha256": "c90db88f3c20176a3128e6ffccb3888dcf58c7382fd962abfdf7011a8cbcdcd9",
+    "after_sha256": "889b4bbfdebf836d008ace1a295d1ffaaf031a9938d1759b06bb4aa2e982f150",
+    "replace": {
+      "old": "git clone --depth=1 \"${TAU2_BENCH_REPO}\" \"${TAU2_BENCH_ROOT}\"",
+      "new": "git init \"${TAU2_BENCH_ROOT}\" && git -C \"${TAU2_BENCH_ROOT}\" remote add origin \"${TAU2_BENCH_REPO}\" && git -C \"${TAU2_BENCH_ROOT}\" fetch --depth=1 origin 2174a603f6d014ef94473ffa95957f6ce27100db && git -C \"${TAU2_BENCH_ROOT}\" checkout --detach FETCH_HEAD"
+    },
+    "path": "tau3-bench/tau3-retail-1/environment/runtime-server/Dockerfile"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-100",
+    "file": "environment/Dockerfile",
+    "change": "Pin tau2 runtime to the recorded original dataset-generation commit; avoid drift from upstream HEAD.",
+    "before_sha256": "1863ddddaf284b73f96af00b070f5dfe3cb42f7602ac516a3def590f79ccbd8a",
+    "after_sha256": "89304ac654ecd15fe08dc30ddd90ce61eb8942af028c85f973316ce49a84345e",
+    "replace": {
+      "old": "git clone --depth=1 \"${TAU2_BENCH_REPO}\" \"${TAU2_BENCH_ROOT}\"",
+      "new": "git init \"${TAU2_BENCH_ROOT}\" && git -C \"${TAU2_BENCH_ROOT}\" remote add origin \"${TAU2_BENCH_REPO}\" && git -C \"${TAU2_BENCH_ROOT}\" fetch --depth=1 origin 2174a603f6d014ef94473ffa95957f6ce27100db && git -C \"${TAU2_BENCH_ROOT}\" checkout --detach FETCH_HEAD"
+    },
+    "path": "tau3-bench/tau3-retail-100/environment/Dockerfile"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-100",
+    "file": "environment/runtime-server/Dockerfile",
+    "change": "Pin tau2 runtime to the recorded original dataset-generation commit; avoid drift from upstream HEAD.",
+    "before_sha256": "c90db88f3c20176a3128e6ffccb3888dcf58c7382fd962abfdf7011a8cbcdcd9",
+    "after_sha256": "889b4bbfdebf836d008ace1a295d1ffaaf031a9938d1759b06bb4aa2e982f150",
+    "replace": {
+      "old": "git clone --depth=1 \"${TAU2_BENCH_REPO}\" \"${TAU2_BENCH_ROOT}\"",
+      "new": "git init \"${TAU2_BENCH_ROOT}\" && git -C \"${TAU2_BENCH_ROOT}\" remote add origin \"${TAU2_BENCH_REPO}\" && git -C \"${TAU2_BENCH_ROOT}\" fetch --depth=1 origin 2174a603f6d014ef94473ffa95957f6ce27100db && git -C \"${TAU2_BENCH_ROOT}\" checkout --detach FETCH_HEAD"
+    },
+    "path": "tau3-bench/tau3-retail-100/environment/runtime-server/Dockerfile"
+  },
+  {
+    "taskset": "cooperbench",
+    "task": "cb-chi-t26-f1-2",
+    "file": "tests/test.sh",
+    "change": "Move descriptive scoring metadata to result.json; preserve original numeric reward.txt and all feature/merge tests.",
+    "before_sha256": "4c410f101b130a35df3a59c376a8972026ee5ba4031a704639a5149eebbd60b2",
+    "after_sha256": "19be56ae98da52e3c5d8a7072c9c78bd4340926584186bbb45cb0465880fdf0d",
+    "replace": {
+      "old": "/logs/verifier/reward.json",
+      "new": "/logs/verifier/result.json"
+    },
+    "path": "datasets/cooperbench/cb-chi-t26-f1-2/tests/test.sh"
+  },
+  {
+    "taskset": "cooperbench",
+    "task": "cb-chi-t26-f1-3",
+    "file": "tests/test.sh",
+    "change": "Move descriptive scoring metadata to result.json; preserve original numeric reward.txt and all feature/merge tests.",
+    "before_sha256": "4c410f101b130a35df3a59c376a8972026ee5ba4031a704639a5149eebbd60b2",
+    "after_sha256": "19be56ae98da52e3c5d8a7072c9c78bd4340926584186bbb45cb0465880fdf0d",
+    "replace": {
+      "old": "/logs/verifier/reward.json",
+      "new": "/logs/verifier/result.json"
+    },
+    "path": "datasets/cooperbench/cb-chi-t26-f1-3/tests/test.sh"
+  },
+  {
+    "taskset": "cooperbench",
+    "task": "cb-chi-t26-f2-3",
+    "file": "tests/test.sh",
+    "change": "Move descriptive scoring metadata to result.json; preserve original numeric reward.txt and all feature/merge tests.",
+    "before_sha256": "4c410f101b130a35df3a59c376a8972026ee5ba4031a704639a5149eebbd60b2",
+    "after_sha256": "19be56ae98da52e3c5d8a7072c9c78bd4340926584186bbb45cb0465880fdf0d",
+    "replace": {
+      "old": "/logs/verifier/reward.json",
+      "new": "/logs/verifier/result.json"
+    },
+    "path": "datasets/cooperbench/cb-chi-t26-f2-3/tests/test.sh"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-0",
+    "file": "environment/Dockerfile",
+    "change": "Install the declared upstream voice websocket dependency required by tau2 imports, without enabling voice tasks.",
+    "before_sha256": "89304ac654ecd15fe08dc30ddd90ce61eb8942af028c85f973316ce49a84345e",
+    "after_sha256": "12a04e50b80a640d2bb0b141d11dbdea37df98047e057df60db5c6a76106fe70",
+    "replace": {
+      "old": "\"${TAU2_BENCH_ROOT}[knowledge]\"",
+      "new": "\"${TAU2_BENCH_ROOT}[knowledge]\" \"websockets>=13.0\""
+    },
+    "path": "tau3-bench/tau3-retail-0/environment/Dockerfile"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-0",
+    "file": "environment/runtime-server/Dockerfile",
+    "change": "Install the declared upstream voice websocket dependency required by tau2 imports, without enabling voice tasks.",
+    "before_sha256": "889b4bbfdebf836d008ace1a295d1ffaaf031a9938d1759b06bb4aa2e982f150",
+    "after_sha256": "827173ed9c05f17838d285084cf0e28748d16dcfb88eda5f903fe98b0ef32273",
+    "replace": {
+      "old": "\"${TAU2_BENCH_ROOT}[knowledge]\"",
+      "new": "\"${TAU2_BENCH_ROOT}[knowledge]\" \"websockets>=13.0\""
+    },
+    "path": "tau3-bench/tau3-retail-0/environment/runtime-server/Dockerfile"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-1",
+    "file": "environment/Dockerfile",
+    "change": "Install the declared upstream voice websocket dependency required by tau2 imports, without enabling voice tasks.",
+    "before_sha256": "89304ac654ecd15fe08dc30ddd90ce61eb8942af028c85f973316ce49a84345e",
+    "after_sha256": "12a04e50b80a640d2bb0b141d11dbdea37df98047e057df60db5c6a76106fe70",
+    "replace": {
+      "old": "\"${TAU2_BENCH_ROOT}[knowledge]\"",
+      "new": "\"${TAU2_BENCH_ROOT}[knowledge]\" \"websockets>=13.0\""
+    },
+    "path": "tau3-bench/tau3-retail-1/environment/Dockerfile"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-1",
+    "file": "environment/runtime-server/Dockerfile",
+    "change": "Install the declared upstream voice websocket dependency required by tau2 imports, without enabling voice tasks.",
+    "before_sha256": "889b4bbfdebf836d008ace1a295d1ffaaf031a9938d1759b06bb4aa2e982f150",
+    "after_sha256": "827173ed9c05f17838d285084cf0e28748d16dcfb88eda5f903fe98b0ef32273",
+    "replace": {
+      "old": "\"${TAU2_BENCH_ROOT}[knowledge]\"",
+      "new": "\"${TAU2_BENCH_ROOT}[knowledge]\" \"websockets>=13.0\""
+    },
+    "path": "tau3-bench/tau3-retail-1/environment/runtime-server/Dockerfile"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-100",
+    "file": "environment/Dockerfile",
+    "change": "Install the declared upstream voice websocket dependency required by tau2 imports, without enabling voice tasks.",
+    "before_sha256": "89304ac654ecd15fe08dc30ddd90ce61eb8942af028c85f973316ce49a84345e",
+    "after_sha256": "12a04e50b80a640d2bb0b141d11dbdea37df98047e057df60db5c6a76106fe70",
+    "replace": {
+      "old": "\"${TAU2_BENCH_ROOT}[knowledge]\"",
+      "new": "\"${TAU2_BENCH_ROOT}[knowledge]\" \"websockets>=13.0\""
+    },
+    "path": "tau3-bench/tau3-retail-100/environment/Dockerfile"
+  },
+  {
+    "taskset": "tau3-bench",
+    "task": "tau3-retail-100",
+    "file": "environment/runtime-server/Dockerfile",
+    "change": "Install the declared upstream voice websocket dependency required by tau2 imports, without enabling voice tasks.",
+    "before_sha256": "889b4bbfdebf836d008ace1a295d1ffaaf031a9938d1759b06bb4aa2e982f150",
+    "after_sha256": "827173ed9c05f17838d285084cf0e28748d16dcfb88eda5f903fe98b0ef32273",
+    "replace": {
+      "old": "\"${TAU2_BENCH_ROOT}[knowledge]\"",
+      "new": "\"${TAU2_BENCH_ROOT}[knowledge]\" \"websockets>=13.0\""
+    },
+    "path": "tau3-bench/tau3-retail-100/environment/runtime-server/Dockerfile"
+  }
+]

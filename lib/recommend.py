@@ -37,6 +37,14 @@ LANG_ALIASES = {"typescript": "javascript", "ts": "javascript", "js": "javascrip
 # What each runnable taskset exercises, for the rules.  The domain is the taskset card's own facet; these are the
 # capability words a profile can match beyond it.
 TASKSET_TRAITS = {
+    "ds1000": {"edits-files", "runs-shell"}, "dacode": {"edits-files", "runs-shell", "reads-docs"},
+    "spreadsheetbench-verified": {"edits-files", "reads-docs"},
+    "scienceagentbench": {"edits-files", "runs-shell", "reads-docs", "long-horizon"},
+    "gaia": {"browses-web", "reads-docs", "runs-shell"},
+    "terminal-bench-2-1": {"runs-shell", "edits-files", "uses-git"},
+    "devopsgym": {"runs-shell", "edits-files", "runs-tests", "long-horizon"},
+    "tau3-bench": {"calls-apis", "reads-docs"}, "kumo": {"runs-shell", "reads-docs"},
+    "cooperbench": {"edits-files", "runs-tests", "uses-git", "multi-agent"},
     "aider_polyglot": {"edits-files", "runs-tests"}, "swebench-verified": {"edits-files", "runs-tests", "uses-git", "long-horizon"},
     "quixbugs": {"edits-files"}, "humanevalfix": {"edits-files", "runs-tests"}, "usaco": {"edits-files", "runs-shell"},
     "spider2-dbt": {"queries-sql", "runs-shell", "edits-files"}, "bird-bench": {"queries-sql"},

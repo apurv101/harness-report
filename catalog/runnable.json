@@ -1,157 +1,417 @@
 {
- "about": "Candidate tasks the site may offer. A candidate is runnable once its newest line in oracle.jsonl says reward 1 (./run.sh oracle).",
- "tasks": [
-  {
-   "taskset": "aider_polyglot",
-   "task": "polyglot_cpp_allergies"
-  },
-  {
-   "taskset": "aider_polyglot",
-   "task": "polyglot_go_palindrome-products"
-  },
-  {
-   "taskset": "aider_polyglot",
-   "task": "polyglot_java_pov"
-  },
-  {
-   "taskset": "aider_polyglot",
-   "task": "polyglot_javascript_triangle"
-  },
-  {
-   "taskset": "aider_polyglot",
-   "task": "polyglot_python_bowling"
-  },
-  {
-   "taskset": "aider_polyglot",
-   "task": "polyglot_python_connect"
-  },
-  {
-   "taskset": "aider_polyglot",
-   "task": "polyglot_rust_bowling"
-  },
-  {
-   "taskset": "swebench-verified",
-   "task": "psf__requests-5414"
-  },
-  {
-   "taskset": "swebench-verified",
-   "task": "sphinx-doc__sphinx-10323"
-  },
-  {
-   "taskset": "swebench-verified",
-   "task": "sphinx-doc__sphinx-8595"
-  },
-  {
-   "taskset": "quixbugs",
-   "task": "quixbugs-java-flatten"
-  },
-  {
-   "taskset": "quixbugs",
-   "task": "quixbugs-python-pascal"
-  },
-  {
-   "taskset": "quixbugs",
-   "task": "quixbugs-python-sieve"
-  },
-  {
-   "taskset": "humanevalfix",
-   "task": "python-11"
-  },
-  {
-   "taskset": "humanevalfix",
-   "task": "python-12"
-  },
-  {
-   "taskset": "humanevalfix",
-   "task": "python-21"
-  },
-  {
-   "taskset": "usaco",
-   "task": "1090"
-  },
-  {
-   "taskset": "usaco",
-   "task": "761"
-  },
-  {
-   "taskset": "usaco",
-   "task": "785"
-  },
-  {
-   "taskset": "spider2-dbt",
-   "task": "divvy001"
-  },
-  {
-   "taskset": "spider2-dbt",
-   "task": "nba001"
-  },
-  {
-   "taskset": "spider2-dbt",
-   "task": "tickit002"
-  },
-  {
-   "taskset": "bird-bench",
-   "task": "card_games__372"
-  },
-  {
-   "taskset": "bird-bench",
-   "task": "student_club__1342"
-  },
-  {
-   "taskset": "bird-bench",
-   "task": "toxicology__315"
-  },
-  {
-   "taskset": "bigcodebench_hard_complete",
-   "task": "bigcodebench_1057"
-  },
-  {
-   "taskset": "bigcodebench_hard_complete",
-   "task": "bigcodebench_162"
-  },
-  {
-   "taskset": "bigcodebench_hard_complete",
-   "task": "bigcodebench_360"
-  },
-  {
-   "taskset": "algotune",
-   "task": "algotune-vectorized-newton"
-  },
-  {
-   "taskset": "algotune",
-   "task": "algotune-vertex-cover"
-  },
-  {
-   "taskset": "evoeval",
-   "task": "14"
-  },
-  {
-   "taskset": "evoeval",
-   "task": "54"
-  },
-  {
-   "taskset": "crustbench",
-   "task": "crustbench-bigint"
-  },
-  {
-   "taskset": "crustbench",
-   "task": "crustbench-clog"
-  },
-  {
-   "taskset": "crustbench",
-   "task": "crustbench-geofence"
-  },
-  {
-   "taskset": "dabstep",
-   "task": "dabstep-26"
-  },
-  {
-   "taskset": "dabstep",
-   "task": "dabstep-43"
-  },
-  {
-   "taskset": "dabstep",
-   "task": "dabstep-58"
-  }
- ]
+  "about": "Candidate tasks the site may offer. A candidate is runnable once its newest line in oracle.jsonl says reward 1 (./run.sh oracle).",
+  "tasks": [
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_cpp_allergies"
+    },
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_go_palindrome-products"
+    },
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_java_pov"
+    },
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_javascript_triangle"
+    },
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_python_bowling"
+    },
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_python_connect"
+    },
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_rust_bowling"
+    },
+    {
+      "taskset": "swebench-verified",
+      "task": "psf__requests-5414"
+    },
+    {
+      "taskset": "swebench-verified",
+      "task": "sphinx-doc__sphinx-10323"
+    },
+    {
+      "taskset": "swebench-verified",
+      "task": "sphinx-doc__sphinx-8595"
+    },
+    {
+      "taskset": "quixbugs",
+      "task": "quixbugs-java-flatten"
+    },
+    {
+      "taskset": "quixbugs",
+      "task": "quixbugs-python-pascal"
+    },
+    {
+      "taskset": "quixbugs",
+      "task": "quixbugs-python-sieve"
+    },
+    {
+      "taskset": "humanevalfix",
+      "task": "python-11"
+    },
+    {
+      "taskset": "humanevalfix",
+      "task": "python-12"
+    },
+    {
+      "taskset": "humanevalfix",
+      "task": "python-21"
+    },
+    {
+      "taskset": "usaco",
+      "task": "1090"
+    },
+    {
+      "taskset": "usaco",
+      "task": "761"
+    },
+    {
+      "taskset": "usaco",
+      "task": "785"
+    },
+    {
+      "taskset": "spider2-dbt",
+      "task": "divvy001"
+    },
+    {
+      "taskset": "spider2-dbt",
+      "task": "nba001"
+    },
+    {
+      "taskset": "spider2-dbt",
+      "task": "tickit002"
+    },
+    {
+      "taskset": "bird-bench",
+      "task": "card_games__372"
+    },
+    {
+      "taskset": "bird-bench",
+      "task": "student_club__1342"
+    },
+    {
+      "taskset": "bird-bench",
+      "task": "toxicology__315"
+    },
+    {
+      "taskset": "bigcodebench_hard_complete",
+      "task": "bigcodebench_1057"
+    },
+    {
+      "taskset": "bigcodebench_hard_complete",
+      "task": "bigcodebench_162"
+    },
+    {
+      "taskset": "bigcodebench_hard_complete",
+      "task": "bigcodebench_360"
+    },
+    {
+      "taskset": "algotune",
+      "task": "algotune-vectorized-newton"
+    },
+    {
+      "taskset": "algotune",
+      "task": "algotune-vertex-cover"
+    },
+    {
+      "taskset": "evoeval",
+      "task": "14"
+    },
+    {
+      "taskset": "evoeval",
+      "task": "54"
+    },
+    {
+      "taskset": "crustbench",
+      "task": "crustbench-bigint"
+    },
+    {
+      "taskset": "crustbench",
+      "task": "crustbench-clog"
+    },
+    {
+      "taskset": "crustbench",
+      "task": "crustbench-geofence"
+    },
+    {
+      "taskset": "dabstep",
+      "task": "dabstep-26"
+    },
+    {
+      "taskset": "dabstep",
+      "task": "dabstep-43"
+    },
+    {
+      "taskset": "dabstep",
+      "task": "dabstep-58"
+    },
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_cpp_all-your-base"
+    },
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_cpp_bank-account"
+    },
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_cpp_binary-search-tree"
+    },
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_cpp_circular-buffer"
+    },
+    {
+      "taskset": "aider_polyglot",
+      "task": "polyglot_cpp_clock"
+    },
+    {
+      "taskset": "compilebench",
+      "task": "jq"
+    },
+    {
+      "taskset": "compilebench",
+      "task": "cowsay"
+    },
+    {
+      "taskset": "compilebench",
+      "task": "curl"
+    },
+    {
+      "taskset": "multi-swe-bench",
+      "task": "nlohmann__json1138"
+    },
+    {
+      "taskset": "multi-swe-bench",
+      "task": "catchorg__catch21422"
+    },
+    {
+      "taskset": "multi-swe-bench",
+      "task": "jqlang__jq1793"
+    },
+    {
+      "taskset": "multi-swe-bench",
+      "task": "ponylang__ponyc1035"
+    },
+    {
+      "taskset": "multi-swe-bench",
+      "task": "facebook__zstd1080"
+    },
+    {
+      "taskset": "multi-swe-bench",
+      "task": "facebook__zstd1105"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t26-f1-2"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t26-f2-3"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-001"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-002"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-003"
+    },
+    {
+      "taskset": "devopsgym",
+      "task": "build_build_implementation_caddy-dns-plugin"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "0"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "1"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "10"
+    },
+    {
+      "taskset": "gaia",
+      "task": "00d579ea-0889-4fd9-a771-2c8d79835c8d"
+    },
+    {
+      "taskset": "gaia",
+      "task": "023e9d44-96ae-4eed-b912-244ee8c3b994"
+    },
+    {
+      "taskset": "gaia",
+      "task": "0383a3ee-47a7-41a4-b493-519bdefe0488"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s0"
+    },
+    {
+      "taskset": "kumo",
+      "task": "cryptographyenv-t4-a6-v1-s0"
+    },
+    {
+      "taskset": "kumo",
+      "task": "mythicenv-t4-a6-v1-s30"
+    },
+    {
+      "taskset": "scienceagentbench",
+      "task": "sab_21"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "10452"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "105-24"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "10747"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-retail-0"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-retail-1"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-retail-100"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "fix-git"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "log-summary-date-ranges"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "regex-log"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s1"
+    },
+    {
+      "taskset": "gaia",
+      "task": "04a04a9b-226c-43fd-b319-d5e89743676f"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "100"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s10"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s11"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "108-24"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "101"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "109-21"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "adaptive-rejection-sampler"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-0"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-1"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "bn-fit-modify"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t26-f1-3"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-10"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t26-f1-4"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-004"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-11"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-005"
+    },
+    {
+      "taskset": "gaia",
+      "task": "0512426f-4d28-49f0-be77-06d05daec096"
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s12"
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "build-pmars"
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-airline-12"
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t26-f2-4"
+    },
+    {
+      "taskset": "ds1000",
+      "task": "102"
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-006"
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "11276"
+    }
+  ]
 }

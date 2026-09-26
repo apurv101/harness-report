@@ -1,0 +1,639 @@
+{
+  "date": "2026-09-26",
+  "platform": "linux/amd64",
+  "policy": "Selected tasks require the original reference solution to score 1 and an empty submission to score 0. Rewards are task-specific; this is an admission check, not a universal scoring interpretation.",
+  "tasks": [
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t26-f1-2",
+      "reference": {
+        "taskset": "cooperbench",
+        "task": "cb-chi-t26-f1-2",
+        "reward": 1,
+        "seconds": 72,
+        "platform": "linux/amd64",
+        "image": "hr-task/cooperbench:cb-chi-t26-f1-2",
+        "at": "2026-09-26T01:53:41Z"
+      },
+      "empty_submission": {
+        "taskset": "cooperbench",
+        "task": "cb-chi-t26-f1-2",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/cooperbench/cb-chi-t26-f1-2/nop-8e9c8595",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 19,
+        "at": "2026-09-26T01:54:52Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t26-f2-3",
+      "reference": {
+        "taskset": "cooperbench",
+        "task": "cb-chi-t26-f2-3",
+        "reward": 1,
+        "seconds": 71,
+        "platform": "linux/amd64",
+        "image": "hr-task/cooperbench:cb-chi-t26-f2-3",
+        "at": "2026-09-26T01:56:10Z"
+      },
+      "empty_submission": {
+        "taskset": "cooperbench",
+        "task": "cb-chi-t26-f2-3",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/cooperbench/cb-chi-t26-f2-3/nop-8fd9852c",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 15,
+        "at": "2026-09-26T01:56:58Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-001",
+      "reference": {
+        "taskset": "dacode",
+        "task": "dacode-data-sa-001",
+        "reward": 1,
+        "seconds": 4,
+        "platform": "linux/amd64",
+        "image": "hr-task/dacode:dacode-data-sa-001",
+        "at": "2026-09-26T01:36:55Z"
+      },
+      "empty_submission": {
+        "taskset": "dacode",
+        "task": "dacode-data-sa-001",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/dacode/dacode-data-sa-001/nop-f65c0695",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 6,
+        "at": "2026-09-26T01:41:26Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-002",
+      "reference": {
+        "taskset": "dacode",
+        "task": "dacode-data-sa-002",
+        "reward": 1,
+        "seconds": 4,
+        "platform": "linux/amd64",
+        "image": "hr-task/dacode:dacode-data-sa-002",
+        "at": "2026-09-26T01:37:01Z"
+      },
+      "empty_submission": {
+        "taskset": "dacode",
+        "task": "dacode-data-sa-002",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/dacode/dacode-data-sa-002/nop-fcbdf779",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 6,
+        "at": "2026-09-26T01:41:26Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "dacode",
+      "task": "dacode-data-sa-003",
+      "reference": {
+        "taskset": "dacode",
+        "task": "dacode-data-sa-003",
+        "reward": 1,
+        "seconds": 4,
+        "platform": "linux/amd64",
+        "image": "hr-task/dacode:dacode-data-sa-003",
+        "at": "2026-09-26T01:37:06Z"
+      },
+      "empty_submission": {
+        "taskset": "dacode",
+        "task": "dacode-data-sa-003",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/dacode/dacode-data-sa-003/nop-119b4895",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 4,
+        "at": "2026-09-26T01:41:30Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "devopsgym",
+      "task": "build_build_implementation_caddy-dns-plugin",
+      "reference": {
+        "taskset": "devopsgym",
+        "task": "build_build_implementation_caddy-dns-plugin",
+        "reward": 1,
+        "seconds": 83,
+        "platform": "linux/amd64",
+        "image": "hr-task/devopsgym:build_build_implementation_caddy-dns-plugin",
+        "at": "2026-09-26T01:43:27Z"
+      },
+      "empty_submission": {
+        "taskset": "devopsgym",
+        "task": "build_build_implementation_caddy-dns-plugin",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/devopsgym/build_build_implementation_caddy-dns-plugin/nop-3b16b8f2",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 15,
+        "at": "2026-09-26T01:49:59Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "ds1000",
+      "task": "0",
+      "reference": {
+        "taskset": "ds1000",
+        "task": "0",
+        "reward": 1,
+        "seconds": 2,
+        "platform": "linux/amd64",
+        "image": "hr-task/ds1000:0",
+        "at": "2026-09-26T01:35:13Z"
+      },
+      "empty_submission": {
+        "taskset": "ds1000",
+        "task": "0",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/ds1000/0/nop-fa57d215",
+        "rc": 2,
+        "reward": 0.0,
+        "seconds": 1,
+        "at": "2026-09-26T01:38:01Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "ds1000",
+      "task": "1",
+      "reference": {
+        "taskset": "ds1000",
+        "task": "1",
+        "reward": 1,
+        "seconds": 1,
+        "platform": "linux/amd64",
+        "image": "hr-task/ds1000:1",
+        "at": "2026-09-26T01:35:15Z"
+      },
+      "empty_submission": {
+        "taskset": "ds1000",
+        "task": "1",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/ds1000/1/nop-d96473d6",
+        "rc": 2,
+        "reward": 0.0,
+        "seconds": 1,
+        "at": "2026-09-26T01:38:02Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "ds1000",
+      "task": "10",
+      "reference": {
+        "taskset": "ds1000",
+        "task": "10",
+        "reward": 1,
+        "seconds": 1,
+        "platform": "linux/amd64",
+        "image": "hr-task/ds1000:10",
+        "at": "2026-09-26T01:35:17Z"
+      },
+      "empty_submission": {
+        "taskset": "ds1000",
+        "task": "10",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/ds1000/10/nop-3e3d03c7",
+        "rc": 2,
+        "reward": 0.0,
+        "seconds": 1,
+        "at": "2026-09-26T01:38:02Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "gaia",
+      "task": "00d579ea-0889-4fd9-a771-2c8d79835c8d",
+      "reference": {
+        "taskset": "gaia",
+        "task": "00d579ea-0889-4fd9-a771-2c8d79835c8d",
+        "reward": 1,
+        "seconds": 1,
+        "platform": "linux/amd64",
+        "image": "hr-task/gaia:00d579ea-0889-4fd9-a771-2c8d79835c8d",
+        "at": "2026-09-26T01:31:27Z"
+      },
+      "empty_submission": {
+        "taskset": "gaia",
+        "task": "00d579ea-0889-4fd9-a771-2c8d79835c8d",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/gaia/00d579ea-0889-4fd9-a771-2c8d79835c8d/nop-e45c5dbb",
+        "rc": 1,
+        "reward": 0.0,
+        "seconds": 1,
+        "at": "2026-09-26T01:38:00Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "gaia",
+      "task": "023e9d44-96ae-4eed-b912-244ee8c3b994",
+      "reference": {
+        "taskset": "gaia",
+        "task": "023e9d44-96ae-4eed-b912-244ee8c3b994",
+        "reward": 1,
+        "seconds": 1,
+        "platform": "linux/amd64",
+        "image": "hr-task/gaia:023e9d44-96ae-4eed-b912-244ee8c3b994",
+        "at": "2026-09-26T01:31:28Z"
+      },
+      "empty_submission": {
+        "taskset": "gaia",
+        "task": "023e9d44-96ae-4eed-b912-244ee8c3b994",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/gaia/023e9d44-96ae-4eed-b912-244ee8c3b994/nop-a8264a80",
+        "rc": 1,
+        "reward": 0.0,
+        "seconds": 1,
+        "at": "2026-09-26T01:38:00Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "gaia",
+      "task": "0383a3ee-47a7-41a4-b493-519bdefe0488",
+      "reference": {
+        "taskset": "gaia",
+        "task": "0383a3ee-47a7-41a4-b493-519bdefe0488",
+        "reward": 1,
+        "seconds": 0,
+        "platform": "linux/amd64",
+        "image": "hr-task/gaia:0383a3ee-47a7-41a4-b493-519bdefe0488",
+        "at": "2026-09-26T01:31:29Z"
+      },
+      "empty_submission": {
+        "taskset": "gaia",
+        "task": "0383a3ee-47a7-41a4-b493-519bdefe0488",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/gaia/0383a3ee-47a7-41a4-b493-519bdefe0488/nop-5d831553",
+        "rc": 1,
+        "reward": 0.0,
+        "seconds": 1,
+        "at": "2026-09-26T01:38:01Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "kumo",
+      "task": "algorithmenv-t4-a6-v1-s0",
+      "reference": {
+        "taskset": "kumo",
+        "task": "algorithmenv-t4-a6-v1-s0",
+        "reward": 1,
+        "seconds": 6,
+        "platform": "linux/amd64",
+        "image": "hr-task/kumo:algorithmenv-t4-a6-v1-s0",
+        "at": "2026-09-26T01:35:41Z"
+      },
+      "empty_submission": {
+        "taskset": "kumo",
+        "task": "algorithmenv-t4-a6-v1-s0",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/kumo/algorithmenv-t4-a6-v1-s0/nop-53f636bb",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 7,
+        "at": "2026-09-26T01:38:52Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "kumo",
+      "task": "cryptographyenv-t4-a6-v1-s0",
+      "reference": {
+        "taskset": "kumo",
+        "task": "cryptographyenv-t4-a6-v1-s0",
+        "reward": 1,
+        "seconds": 6,
+        "platform": "linux/amd64",
+        "image": "hr-task/kumo:cryptographyenv-t4-a6-v1-s0",
+        "at": "2026-09-26T01:35:55Z"
+      },
+      "empty_submission": {
+        "taskset": "kumo",
+        "task": "cryptographyenv-t4-a6-v1-s0",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/kumo/cryptographyenv-t4-a6-v1-s0/nop-0dc9ddf4",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 7,
+        "at": "2026-09-26T01:39:06Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "kumo",
+      "task": "mythicenv-t4-a6-v1-s30",
+      "reference": {
+        "taskset": "kumo",
+        "task": "mythicenv-t4-a6-v1-s30",
+        "reward": 1,
+        "seconds": 6,
+        "platform": "linux/amd64",
+        "image": "hr-task/kumo:mythicenv-t4-a6-v1-s30",
+        "at": "2026-09-26T01:35:48Z"
+      },
+      "empty_submission": {
+        "taskset": "kumo",
+        "task": "mythicenv-t4-a6-v1-s30",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/kumo/mythicenv-t4-a6-v1-s30/nop-e10795a3",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 7,
+        "at": "2026-09-26T01:38:59Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "scienceagentbench",
+      "task": "sab_21",
+      "reference": {
+        "taskset": "scienceagentbench",
+        "task": "sab_21",
+        "reward": 1,
+        "seconds": 203,
+        "platform": "linux/amd64",
+        "image": "hr-task/scienceagentbench:sab_21",
+        "at": "2026-09-26T01:52:14Z"
+      },
+      "empty_submission": {
+        "taskset": "scienceagentbench",
+        "task": "sab_21",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/scienceagentbench/sab_21/nop-6dad43d3",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 4,
+        "at": "2026-09-26T01:52:56Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "10452",
+      "reference": {
+        "taskset": "spreadsheetbench-verified",
+        "task": "10452",
+        "reward": 1,
+        "seconds": 33,
+        "platform": "linux/amd64",
+        "image": "hr-task/spreadsheetbench-verified:10452",
+        "at": "2026-09-26T01:32:14Z"
+      },
+      "empty_submission": {
+        "taskset": "spreadsheetbench-verified",
+        "task": "10452",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/spreadsheetbench-verified/10452/nop-ba35d3b5",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 43,
+        "at": "2026-09-26T01:38:45Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "105-24",
+      "reference": {
+        "taskset": "spreadsheetbench-verified",
+        "task": "105-24",
+        "reward": 1,
+        "seconds": 37,
+        "platform": "linux/amd64",
+        "image": "hr-task/spreadsheetbench-verified:105-24",
+        "at": "2026-09-26T01:32:52Z"
+      },
+      "empty_submission": {
+        "taskset": "spreadsheetbench-verified",
+        "task": "105-24",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/spreadsheetbench-verified/105-24/nop-d0d7f149",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 43,
+        "at": "2026-09-26T01:38:45Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "spreadsheetbench-verified",
+      "task": "10747",
+      "reference": {
+        "taskset": "spreadsheetbench-verified",
+        "task": "10747",
+        "reward": 1,
+        "seconds": 36,
+        "platform": "linux/amd64",
+        "image": "hr-task/spreadsheetbench-verified:10747",
+        "at": "2026-09-26T01:33:30Z"
+      },
+      "empty_submission": {
+        "taskset": "spreadsheetbench-verified",
+        "task": "10747",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/spreadsheetbench-verified/10747/nop-bb582243",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 39,
+        "at": "2026-09-26T01:39:23Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-retail-0",
+      "reference": {
+        "taskset": "tau3-bench",
+        "task": "tau3-retail-0",
+        "reward": 1,
+        "seconds": 104,
+        "platform": "linux/amd64",
+        "image": "hr-task/tau3-bench:tau3-retail-0",
+        "at": "2026-09-26T01:55:13Z"
+      },
+      "empty_submission": {
+        "taskset": "tau3-bench",
+        "task": "tau3-retail-0",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/tau3-bench/tau3-retail-0/nop-3a07c72a",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 14,
+        "at": "2026-09-26T01:56:43Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-retail-1",
+      "reference": {
+        "taskset": "tau3-bench",
+        "task": "tau3-retail-1",
+        "reward": 1,
+        "seconds": 22,
+        "platform": "linux/amd64",
+        "image": "hr-task/tau3-bench:tau3-retail-1",
+        "at": "2026-09-26T01:55:35Z"
+      },
+      "empty_submission": {
+        "taskset": "tau3-bench",
+        "task": "tau3-retail-1",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/tau3-bench/tau3-retail-1/nop-c1a8e4fe",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 15,
+        "at": "2026-09-26T01:56:43Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "tau3-bench",
+      "task": "tau3-retail-100",
+      "reference": {
+        "taskset": "tau3-bench",
+        "task": "tau3-retail-100",
+        "reward": 1,
+        "seconds": 19,
+        "platform": "linux/amd64",
+        "image": "hr-task/tau3-bench:tau3-retail-100",
+        "at": "2026-09-26T01:55:54Z"
+      },
+      "empty_submission": {
+        "taskset": "tau3-bench",
+        "task": "tau3-retail-100",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/tau3-bench/tau3-retail-100/nop-f09d8034",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 13,
+        "at": "2026-09-26T01:56:56Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "fix-git",
+      "reference": {
+        "taskset": "terminal-bench-2-1",
+        "task": "fix-git",
+        "reward": 1,
+        "seconds": 8,
+        "platform": "linux/amd64",
+        "image": "hr-task/terminal-bench-2-1:fix-git",
+        "at": "2026-09-26T01:37:23Z"
+      },
+      "empty_submission": {
+        "taskset": "terminal-bench-2-1",
+        "task": "fix-git",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/terminal-bench-2-1/fix-git/nop-22b71aa5",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 8,
+        "at": "2026-09-26T01:41:39Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "log-summary-date-ranges",
+      "reference": {
+        "taskset": "terminal-bench-2-1",
+        "task": "log-summary-date-ranges",
+        "reward": 1,
+        "seconds": 82,
+        "platform": "linux/amd64",
+        "image": "hr-task/terminal-bench-2-1:log-summary-date-ranges",
+        "at": "2026-09-26T01:38:47Z"
+      },
+      "empty_submission": {
+        "taskset": "terminal-bench-2-1",
+        "task": "log-summary-date-ranges",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/terminal-bench-2-1/log-summary-date-ranges/nop-b5376c66",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 11,
+        "at": "2026-09-26T01:41:50Z",
+        "passed": true
+      }
+    },
+    {
+      "taskset": "terminal-bench-2-1",
+      "task": "regex-log",
+      "reference": {
+        "taskset": "terminal-bench-2-1",
+        "task": "regex-log",
+        "reward": 1,
+        "seconds": 33,
+        "platform": "linux/amd64",
+        "image": "hr-task/terminal-bench-2-1:regex-log",
+        "at": "2026-09-26T01:36:56Z"
+      },
+      "empty_submission": {
+        "taskset": "terminal-bench-2-1",
+        "task": "regex-log",
+        "check": "empty-submission",
+        "platform": "linux/amd64",
+        "logs": "work/expansion/terminal-bench-2-1/regex-log/nop-a7c232c6",
+        "rc": 0,
+        "reward": 0.0,
+        "seconds": 35,
+        "at": "2026-09-26T01:42:01Z",
+        "passed": true
+      }
+    }
+  ],
+  "excluded": [
+    {
+      "taskset": "cooperbench",
+      "task": "cb-chi-t26-f1-3",
+      "reason": "Reference reward 0: feature1_passed=false; original feature test is preserved."
+    }
+  ]
+}

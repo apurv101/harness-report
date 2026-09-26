@@ -1,0 +1,11 @@
+{
+  "terminal-bench-2-1": {
+    "dataset": "terminal-bench/terminal-bench-2-1",
+    "version": "2.0.2",
+    "revision": 6,
+    "digest": "sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a",
+    "version_id": "f92eea12-ff70-4d30-ace0-003abf294998",
+    "tasks": 89,
+    "local_path": "hub-datasets/terminal-bench-2-1"
+  }
+}

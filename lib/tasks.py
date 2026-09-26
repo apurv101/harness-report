@@ -130,6 +130,9 @@ def corpus():
 # Tasksets the catalog does not describe, or files wrongly by keyword ("swtbench" is not multimodal).  Checked by hand
 # against each taskset's instructions; everything not listed here takes the catalog's facet or the regex guess.
 DOMAIN_OVERRIDES = {
+    "ds1000": "data-sql", "dacode": "data-sql", "spreadsheetbench-verified": "office-docs",
+    "scienceagentbench": "science-math", "gaia": "web-research", "terminal-bench-2-1": "devops-sre",
+    "devopsgym": "devops-sre", "tau3-bench": "customer-service", "kumo": "reasoning-knowledge", "cooperbench": "swe",
     "bird-bench": "data-sql", "spider2-dbt": "data-sql", "ade-bench": "data-sql", "humanevalfix": "swe",
     "quixbugs": "swe", "swegym": "swe", "swegym-lite": "swe", "swesmith": "swe", "gso": "swe", "featbench": "swe",
     "swtbench-verified": "swe", "ml_dev_bench": "ml-research", "rexbench": "ml-research", "qcircuitbench": "science-math",
