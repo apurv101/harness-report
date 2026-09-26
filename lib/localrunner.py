@@ -25,14 +25,14 @@ def stop_process(pid, eid, sig=signal.SIGTERM):
 
 
 def cleanup(eid):
-    """Labels restrict cleanup to this job's containers and networks."""
-    for kind in ("container", "network"):
+    """Labels restrict cleanup to this job's containers, networks and task volumes."""
+    for kind in ("container", "network", "volume"):
         result = subprocess.run(["docker", kind, "ls", "-q", "--filter", f"label=hr.evaluation={eid}",
                                  *(["-a"] if kind == "container" else [])], capture_output=True, text=True, timeout=30)
         if result.returncode: raise RuntimeError(f"could not inspect Docker {kind}s for {eid}: {result.stderr.strip()}")
         ids = result.stdout.split()
         if ids:
-            result = subprocess.run(["docker", kind, "rm", *(["-f"] if kind == "container" else []), *ids],
+            result = subprocess.run(["docker", kind, "rm", *(["-f", "-v"] if kind == "container" else []), *ids],
                                     capture_output=True, text=True, timeout=30)
             if result.returncode: raise RuntimeError(f"could not clean Docker {kind}s for {eid}: {result.stderr.strip()}")
 

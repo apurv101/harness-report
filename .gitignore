@@ -10,3 +10,5 @@ web/node_modules/
 web/dist/
 /evals/
 /profiles/.*.lock
+
+.venv-harbor/

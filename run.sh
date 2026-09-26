@@ -32,7 +32,7 @@
 #   --block-url R refuse URLs matching regex R (repeatable; hosts only unless --egress inspect or plain http)
 #
 # Stages:   fetch     the repo's current HEAD → work/<name>/repo (an existing clone is fetched and reset to it)
-#           select    resolve the Harbor tasks; skip multi-container (docker-compose) ones; build the first task image
+#           select    resolve the Harbor tasks; route Compose tasks through Harbor; build the first task image
 #           analyze   recipes are kept per commit in recipes/<name>@<sha>.json; the same commit reuses its recipe with
 #                     no AI call. A new commit runs claude -p, seeded with the last working recipe for this repo, which
 #                     reads the repo and returns a recipe: an OVERLAY Dockerfile (ARG BASE / FROM ${BASE}) that
@@ -195,7 +195,7 @@ fi
 BATCH="$WORK/batch-$RUN_ID.jsonl"; : > "$BATCH"; INFRA_FAIL=0
 for TASKNAME in "${TASKS[@]}"; do
   TDIR="$TSD/$TASKNAME"
-  IFS=$'\t' read -r _ _ AGENT_T VERIF_T CPUS MEM _ _ < <(task_meta "$TDIR")
+  IFS='|' read -r _ _ AGENT_T VERIF_T CPUS MEM _ _ < <(task_meta "$TDIR")
   RES_ARGS=(); [ -n "$CPUS" ] && RES_ARGS+=(--cpus "$CPUS"); [ -n "$MEM" ] && RES_ARGS+=(--memory "$MEM")
   stage task "$TASKNAME  (agent ${AGENT_T}s, verifier ${VERIF_T}s${CPUS:+, cpus $CPUS}${MEM:+, mem $MEM})"
   if ! TIMG="$(task_image "$TDIR" "$TS_NAME" "$TASKNAME")"; then echo "task image failed for $TASKNAME; see work/$NAME/task-build.log"; emit type error msg "task image failed for $TASKNAME"; INFRA_FAIL=1; continue; fi

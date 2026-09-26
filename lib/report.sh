@@ -7,8 +7,8 @@ cmd_tasks() {
   [ "${2:-}" = --grep ] && RE="${3:?}"
   TSD="$(taskset_dir "$TS")"
   while IFS= read -r t; do
-    IFS=$'\t' read -r diff cat _ _ _ _ _ compose < <(task_meta "$TSD/$t")
-    printf '%-60s %-8s %-24s %s\n' "$t" "$diff" "$cat" "${compose:+(multi-container, skipped)}"; N=$((N+1))
+    IFS='|' read -r diff cat _ _ _ _ _ compose < <(task_meta "$TSD/$t")
+    printf '%-60s %-8s %-24s %s\n' "$t" "$diff" "$cat" "${compose:+(multi-container, Harbor backend)}"; N=$((N+1))
   done < <(list_tasks "$TSD" "$RE")
   echo "$N tasks in $TSD"
 }

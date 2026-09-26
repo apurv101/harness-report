@@ -48,7 +48,7 @@ folder, is Python beside it — so the shell stays the plumbing and the formats 
 | stage | what happens | leaves behind |
 |---|---|---|
 | fetch | shallow `git clone` | `work/<name>/repo/` |
-| select | (Harbor mode) resolve the taskset and the chosen tasks, skip multi-container ones, build the first task image | image `hr-task/<taskset>:<task>` |
+| select | (Harbor mode) resolve the taskset and the chosen tasks, route Compose tasks to the pinned Harbor backend, build the first task image | image `hr-task/<taskset>:<task>` |
 | analyze | `claude -p` reads the repo and returns a recipe as JSON: an overlay Dockerfile (`ARG BASE` / `FROM ${BASE}`) that installs the harness self-contained under `/opt/harness`, the env that points the harness at the proxy, the command that runs one task from `$TASK`, a check command, and a fallback base image | `work/<name>/recipe.json`, `Dockerfile`, `run-harness` |
 | build | `docker build` of the overlay FROM the fallback base and, in Harbor mode, FROM the first task image; the check command runs in both with no network; a failure is fed back to the AI, three tries | images `hr-<name>` and `hr-<name>/<taskset>:<task>` |
 | proxy | `proxy.py` in its own container on the `hr-net` network with `~/.aws` mounted read-only; the harness container never holds credentials | |
@@ -63,9 +63,38 @@ cached per harness x task image.
 The task owns the container: `<task>/environment/Dockerfile` (or `task.toml`'s `docker_image`) is the base,
 the harness overlay is built on top of it, `instruction.md` becomes `$TASK`, the agent runs with cwd = the task
 image's `WORKDIR`, then `tests/test.sh` writes `/logs/verifier/reward.txt`. Budgets (`agent`/`verifier`
-`timeout_sec`, `cpus`, `memory`) come from `task.toml`. Multi-container tasks (docker-compose) are skipped.
+`timeout_sec`, `cpus`, `memory`) come from `task.toml`. Multi-container tasks (Docker Compose) run through the optional Harbor backend.
 Nothing in the task image changes except what the overlay adds under `/opt/harness`; the harness itself is
 never modified.
+
+Compose execution requires Docker Compose and Harbor 0.23.0. Install its dependencies separately:
+
+```sh
+python3.12 -m venv .venv-harbor
+.venv-harbor/bin/pip install -r requirements-harbor.txt
+```
+
+The launcher uses `.venv-harbor`, an existing `harbor` installation, or `HR_HARBOR_PYTHON`.
+Single-container runs do not import Harbor. The worker installer includes the pinned backend and Compose plugin.
+`lib/harbor_backend.py` resolves the task's Compose configuration using Harbor, builds the main task image,
+and stages a per-run copy with our harness overlay. Harbor's trial lifecycle starts services, waits for health
+checks, executes the harness through `lib/harbor_agent.py`, runs the original verifier, and tears down the stack.
+The original task is never edited. Service state, named volumes, and gateway networks are isolated per run.
+Declared OpenAI/Anthropic sidecar connections are routed through the recording proxy; agent and sidecar calls
+share the run's recording. A stopped worker reaps task volumes as well as containers and networks.
+
+`harbor-result.json` retains Harbor's full result, every reward metric, and any infrastructure/grader error.
+The report's scalar `reward` uses only a metric explicitly named `reward`; no aggregate is invented for other
+metrics. Oracle runs use the same backend for Compose tasks. Readiness still requires task-specific validation;
+adding backend support does not change the site's candidate list.
+
+Current scope: single-step Linux Compose tasks with a `main` service and project-owned Docker networks/volumes.
+External shared resources and `network_mode` (including host/shared namespaces) are rejected explicitly.
+Task MCP services are started, but an arbitrary harness must already know how to use the task's tool interface.
+Windows/VM/GPU execution and universal harness-to-MCP configuration are not supplied by this bridge.
+Harbor's native reward validation is preserved: for example, the saved KUMO snapshot emits a `reward.json`
+containing string metadata, which Harbor 0.23.0 rejects even though it also writes `reward.txt`; that is reported
+as a grader compatibility error, not silently turned into a score.
 
 A taskset is a directory of task folders, given as a path or a name under `$HARBOR_TASKS/{datasets,hub-datasets}`.
 Pick tasks with `--tasks a,b`, `--grep re`, `--limit N` or `--all`; `-k N` repeats each task N times so pass^k
@@ -195,7 +224,7 @@ route with `OPENAI_BASE_URL` pointed at the proxy and the model name `gpt-4o`, w
 `web/` is the single frontend: a React + TypeScript app (Vite) covering the landing page, the GitHub
 onboarding preview, and the real recorded evaluations, with one shared navigation and design.
 `npm run build` writes `web/dist`, which `serve.py` serves together with the read-only `runs/` API.
-Python still has no dependencies; the frontend is the only thing that needs a build.
+The API uses Python’s standard library. The optional multi-container runner has its own pinned Harbor dependencies.
 
 ```sh
 npm --prefix web install                    # once

@@ -114,3 +114,8 @@ and running cancellation, owner checks, an HTTP restart, verifier rewards and mo
 call recording, worker crash recovery and worker-pool exclusivity. It never invokes a cloud model or the recipe analyzer. Docker may
 download image layers or proxy dependencies. The temporary table and labelled
 Docker resources are removed; the printed temporary directory retains diagnostic logs.
+
+Compose tasks automatically use the optional pinned Harbor backend. Install `requirements-harbor.txt` in
+`.venv-harbor` (Python 3.12+) or set `HR_HARBOR_PYTHON` to that environment's Python. Docker Compose must be
+available. See README.md for supported task shapes and result semantics. The explicit integration check is
+`python3 tests/harbor_docker_smoke.py`; it uses a local fake model and temporary task copies.

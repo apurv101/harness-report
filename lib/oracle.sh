@@ -21,8 +21,19 @@ cmd_oracle() {
     if [ ! -f "$TDIR/task.toml" ]; then echo "no task '$t' in $TSD"; FAIL=1; continue; fi
     if [ ! -f "$TDIR/solution/solve.sh" ]; then echo "no solution/solve.sh"; REWARD=nosolution
     elif ! TIMG="$(task_image "$TDIR" "$TS_NAME" "$t")"; then echo "task image failed; see work/oracle/task-build.log"; REWARD=noimage
+    elif task_compose "$TDIR"; then
+      S0=$(date +%s)
+      local HB_OUT="$WORK/harbor-$t-$(date +%s)-$$"
+      mkdir -p "$HB_OUT"
+      if harbor_oracle "$TDIR" "$TIMG" "$HB_OUT"; then RC=0; else RC=$?; fi
+      REWARD="$(python3 - "$HB_OUT/harbor-result.json" <<'PY'
+import json,sys
+try: print(json.dumps(json.load(open(sys.argv[1])).get('reward')))
+except OSError: print('null')
+PY
+)"
     else
-      IFS=$'\t' read -r _ _ _ VERIF_T _ _ _ _ < <(task_meta "$TDIR")
+      IFS='|' read -r _ _ _ VERIF_T _ _ _ _ < <(task_meta "$TDIR")
       WORKDIR="$(docker image inspect -f '{{.Config.WorkingDir}}' "$TIMG")"; WORKDIR="${WORKDIR:-/app}"
       C="hr-oracle-$$-$(printf '%s' "$t" | tr -c 'a-zA-Z0-9_.-' '-' | cut -c1-40)"
       docker rm -f "$C" >/dev/null 2>&1 || true
@@ -52,3 +63,15 @@ EOF
   done
   return "$FAIL"
 }
+
+# Separate network and process-scoped teardown; never alters the task or candidate list.
+harbor_oracle() (
+  local task="$1" image="$2" out="$3" net="hr-oracle-$$-$RANDOM"
+  docker network create "$net" >/dev/null || exit 1
+  trap 'docker network rm "$net" >/dev/null 2>&1 || true' EXIT
+  trap 'exit 143' TERM INT
+  local wd; wd="$(docker image inspect -f '{{.Config.WorkingDir}}' "$image")"
+  harbor_backend run --oracle --task "$task" --image "$image" --out "$out" --work "$out/work" \
+    --workdir "${wd:-/app}" --platform "$PLATFORM" --network "$net" --verify-network "$net" --egress open \
+    > "$out/oracle.log" 2>&1
+)

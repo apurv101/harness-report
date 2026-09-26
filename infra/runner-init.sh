@@ -10,6 +10,14 @@ aws s3 cp 's3://${assets_bucket}/${release_key}' /tmp/runner.zip --only-show-err
 unzip -q /tmp/runner.zip -d /opt/harness-report
 chmod +x /opt/harness-report/run.sh /opt/harness-report/hr-agentd
 rm /tmp/runner.zip
+# Older prepared images predate the optional Compose backend.
+if ! /opt/hr-venv/bin/python /opt/harness-report/lib/harbor_backend.py check >/dev/null 2>&1; then
+  /opt/hr-venv/bin/pip install --quiet -r /opt/harness-report/requirements-harbor.txt
+fi
+if ! docker compose version >/dev/null 2>&1; then
+  apt-get update -y
+  apt-get install -y docker-compose-plugin
+fi
 cat > /opt/harness-report/.env <<'ENVFILE'
 MODEL=${model}
 ANALYZER_MODEL=${analyzer_model}

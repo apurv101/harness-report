@@ -3,15 +3,15 @@
 
     task.py <task-dir>
 
-Prints one tab-separated line, the fields the runner needs from a task:
+Prints one pipe-separated line, the fields the runner needs from a task:
 
     difficulty  category  agent_timeout  verifier_timeout  cpus  memory  docker_image  compose
 
-`compose` is the string "compose" when the task brings a docker-compose file, which this runner cannot run.
+`compose` selects the optional Harbor backend for a multi-container task.
 """
 import sys, tomllib, os
 
-COMPOSE = ("docker-compose.yaml", "docker-compose.yml", "compose.yaml")
+COMPOSE = ("docker-compose.yaml", "docker-compose.yml", "compose.yaml", "compose.yml")
 
 
 def meta(d):
@@ -31,5 +31,5 @@ def meta(d):
 
 if __name__ == "__main__":
     x = meta(sys.argv[1])
-    print("\t".join(str(v) for v in [x["difficulty"], x["category"], x["agent_timeout"], x["verifier_timeout"], x["cpus"],
+    print("|".join(str(v) for v in [x["difficulty"], x["category"], x["agent_timeout"], x["verifier_timeout"], x["cpus"],
                                       x["memory"], x["docker_image"], "compose" if x["compose"] else ""]))

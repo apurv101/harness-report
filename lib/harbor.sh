@@ -7,8 +7,11 @@ taskset_dir() {
     [ -d "$d" ] && { cd "$d" && pwd; return; }; done
   die "no taskset '$1' (looked in $HARBOR_TASKS/{datasets,hub-datasets,.})"
 }
-# task_meta <task-dir>: one tab-separated line: difficulty category agent_timeout verifier_timeout cpus memory docker_image compose
+# task_meta <task-dir>: one pipe-separated line: difficulty category agent_timeout verifier_timeout cpus memory docker_image compose
 task_meta() { python3 "$HERE/lib/task.py" "$1"; }
+task_compose() { local f; for f in docker-compose.yaml docker-compose.yml compose.yaml compose.yml; do
+  [ ! -f "$1/environment/$f" ] || return 0; done; return 1; }
+harbor_backend() { python3 "$HERE/lib/harbor_python.py" "$@"; }
 # list_tasks <taskset-dir> [regex]: task folder names (those with a task.toml), sorted.
 list_tasks() { local d; for d in "$1"/*/; do [ -f "$d/task.toml" ] && basename "$d"; done | { [ -n "${2:-}" ] && grep -E -- "$2" || cat; } | sort; }
 
@@ -16,10 +19,13 @@ list_tasks() { local d; for d in "$1"/*/; do [ -f "$d/task.toml" ] && basename "
 task_image() {
   local tdir="$1" tag="hr-task/$2:$3" prebuilt
   [ "${HR_ISOLATED_RUN:-0}" != 1 ] || tag="hr-task/$JOB_TAG/$2:$3"
-  if [ -f "$tdir/environment/Dockerfile" ]; then
+  if task_compose "$tdir"; then
+    harbor_backend image --task "$tdir" --work "$WORK/harbor-build/$3" --image "$tag" --platform "$PLATFORM" \
+      > "$WORK/task-build.log" 2>&1 || { tail -30 "$WORK/task-build.log" >&2; return 1; }
+  elif [ -f "$tdir/environment/Dockerfile" ]; then
     docker build -q ${JOB_LABEL[@]+"${JOB_LABEL[@]}"} --platform "$PLATFORM" -t "$tag" "$tdir/environment" > "$WORK/task-build.log" 2>&1 || { tail -30 "$WORK/task-build.log" >&2; return 1; }
   else
-    IFS=$'\t' read -r _ _ _ _ _ _ prebuilt _ < <(task_meta "$tdir")
+    IFS='|' read -r _ _ _ _ _ _ prebuilt _ < <(task_meta "$tdir")
     [ -n "$prebuilt" ] || { echo "task $3 has neither environment/Dockerfile nor docker_image" >&2; return 1; }
     [ "$(image_platform "$prebuilt")" = "$PLATFORM" ] || docker pull -q --platform "$PLATFORM" "$prebuilt" >/dev/null || return 1
     tag="$prebuilt"
@@ -27,7 +33,7 @@ task_image() {
   echo "$tag"
 }
 
-# select_tasks: resolve --tasks/--grep/--limit/--all against the taskset, drop the multi-container ones, and build
+# select_tasks: resolve --tasks/--grep/--limit/--all, check the optional Harbor backend, and build
 # the first task's image — the overlay is validated against it before any task runs.
 # Sets TSD TS_NAME TASKS FIRST_TASK_IMG FIRST_TASK_DF.
 select_tasks() {
@@ -42,8 +48,8 @@ select_tasks() {
       CAND=(); while IFS= read -r t; do CAND+=("$t"); done < <(list_tasks "$TSD" "$GREP" | { [ -n "$LIMIT" ] && head -n "$LIMIT" || cat; })
     fi
     for t in "${CAND[@]}"; do
-      IFS=$'\t' read -r _ _ _ _ _ _ _ compose < <(task_meta "$TSD/$t")
-      if [ -n "$compose" ]; then echo "skip   $t  (multi-container task; not supported by this runner)"; else TASKS+=("$t"); fi
+      if task_compose "$TSD/$t"; then harbor_backend check || die "Harbor backend is unavailable"; fi
+      TASKS+=("$t")
     done
     [ "${#TASKS[@]}" -gt 0 ] || die "no runnable tasks selected"
     echo "tasks  ${#TASKS[@]} × k=$K:  ${TASKS[*]:0:8}$([ "${#TASKS[@]}" -gt 8 ] && echo " …")"

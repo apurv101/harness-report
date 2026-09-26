@@ -27,6 +27,10 @@ run_one() {
   store publish "$OUT" --card
   stage proxy "recording → ${OUT#$HERE/}/calls.jsonl"
   start_proxy "$(proxy_name "$RUN")" "$OUT"
+  if [ -n "$TDIR" ] && task_compose "$TDIR"; then
+    run_harbor
+    return
+  fi
   local ENV_ARGS=(); while IFS= read -r kv; do ENV_ARGS+=(-e "$kv"); done < <(python3 "$HERE/lib/recipe.py" env "$RECIPE" "$PROXY_URL")
   stage run "$TASKNAME  cwd=$WORKDIR  timeout=${AGENT_T}s  $RUN_CMD"
   CUR_RUN="hr-run-$RUN"; docker rm -f "$CUR_RUN" >/dev/null 2>&1 || true
@@ -63,4 +67,30 @@ run_one() {
   emit type result run "$RUN" task "$TASKNAME" rc "$RC" reward "$REWARD" seconds "$SECS"
   # and the whole run: the card again, every model call, the egress, the verifier's tests, the files
   store publish "$OUT"
+}
+
+# Compose tasks use Harbor's trial lifecycle and our ordinary report/proxy contracts.
+run_harbor() {
+  stage run "Harbor multi-container backend: $TASKNAME"
+  local backend_rc=0
+  HR_CONTROL_TOKEN="$CONTROL_TOKEN" harbor_backend run --task "$TDIR" --work "$WORK/harbor-runs/$RUN" \
+    --out "$OUT" --image "$OTAG" --platform "$PLATFORM" --recipe "$RECIPE" --wrapper "$WRAPPER" \
+    --workdir "$WORKDIR" --image-path "$(image_path "$OTAG")" --proxy "$PROXY_URL" \
+    --proxy-container "$CUR_PROXY" --network "$HNET" --verify-network "$NET" --egress "$EGRESS" || backend_rc=$?
+  RC=1; SECS=0; REWARD=null; VRC=""
+  if [ -f "$OUT/harbor-result.json" ]; then
+    IFS='|' read -r RC SECS REWARD VRC < <(python3 - "$OUT/harbor-result.json" <<'PY'
+import json,sys
+r=json.load(open(sys.argv[1]))
+print('|'.join([str(r['rc']),str(r['seconds']),json.dumps(r['reward']),str(r['verifier_rc'] or '')]))
+PY
+)
+  fi
+  finish_containers
+  python3 "$HERE/lib/runjson.py" result "$OUT" "$RC" "$SECS" "$REWARD" "$VRC"
+  emit type result run "$RUN" task "$TASKNAME" rc "$RC" reward "$REWARD" seconds "$SECS"
+  store publish "$OUT"
+  if [ "$backend_rc" != 0 ]; then
+    INFRA_FAIL=1; emit type error msg "Harbor trial failed; see $OUT/harbor-result.json and evaluation console"
+  fi
 }

@@ -64,6 +64,11 @@ def result(args):
                 "models": [{"requested": r, "served": s, "calls": n} for (r, s), n in
                            sorted(collections.Counter((c.get("model_requested"), c.get("model")) for c in calls).items(), key=str)],
                 "files": sorted(os.listdir(out))})
+    detail = os.path.join(out, "harbor-result.json")
+    if os.path.isfile(detail):
+        backend = json.load(open(detail))
+        rec.update(backend="harbor", backend_version=backend["version"], rewards=backend.get("rewards"),
+                   backend_error=backend.get("error"))
     json.dump(rec, open(f"{out}/run.json", "w"), indent=2)
     print(f"rc={rc}  {secs}s  model calls={len(calls)} (in={rec['input_tokens']} out={rec['output_tokens']} tokens, {rec['errors']} errors)" + (f"  reward={reward}" if rec["kind"] == "harbor" else ""))
     e = rec["egress"]; print(f"egress: {e['connections']} connections, {e['blocked']} blocked" + (f", {e['tls_failed']} refused interception" if e["tls_failed"] else "")
