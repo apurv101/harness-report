@@ -40,7 +40,10 @@ SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".trial"}  
 COMPOSE = ("docker-compose.yaml", "docker-compose.yml", "compose.yaml", "compose.yml")
 # list price per million tokens (input, output, cache write, cache read): the spend cap's estimate, not the bill
 PRICES = [("fable-5-1", (10, 50, 12.5, 0.25)), ("fable-5", (10, 50, 12.5, 1.0)), ("opus-5-5", (4, 20, 5, 0.2)),
-          ("opus-5", (5, 25, 6.25, 0.5)), ("sonnet-5", (2, 10, 2.5, 0.2)), ("haiku-4-5", (1, 5, 1.25, 0.1))]
+          ("opus-5", (5, 25, 6.25, 0.5)), ("sonnet-5", (2, 10, 2.5, 0.2)), ("sonnet-4-6", (3, 15, 3.75, 0.3)),
+          ("sonnet-4-5", (3, 15, 3.75, 0.3)), ("haiku-4-5", (1, 5, 1.25, 0.1))]
+# Bedrock serves these on the stack that takes top-level cache_control; older models there need explicit breakpoints
+TOP_LEVEL_CACHE = ("fable", "mythos", "opus-5", "opus-4-7", "opus-4-8", "sonnet-5")
 
 
 def say(msg): print(msg, file=sys.stderr, flush=True)
@@ -84,6 +87,16 @@ def connect(target):
     if kind == "anthropic" and model:
         return anthropic.Anthropic(timeout=900, max_retries=4), model
     sys.exit(f"recipe agent: a model target is bedrock/<id> or anthropic/<id>, not {target!r}")
+
+
+def mark_cache(messages):
+    """Explicit breakpoints on the newest user turn, for models that refuse top-level cache_control (the system block
+    carries the other one); the previous turn's marker is moved, so a request never holds more than two."""
+    for m in messages:
+        if m["role"] == "user" and isinstance(m["content"], list):
+            for b in m["content"]: b.pop("cache_control", None)
+    if isinstance(messages[-1]["content"], str): messages[-1]["content"] = [{"type": "text", "text": messages[-1]["content"]}]
+    messages[-1]["content"][-1]["cache_control"] = {"type": "ephemeral"}
 
 
 def cost(model, usage):
@@ -391,10 +404,12 @@ def main():
     for turn in range(1, max_turns + 1):
         if spend >= max_usd: stop(1, f"stopped: spend reached the ${max_usd:.0f} cap (RECIPE_AGENT_MAX_USD)")
         if time.time() - t0 >= max_s: stop(1, f"stopped: {max_s} s elapsed (RECIPE_AGENT_MAX_SECONDS)")
+        if label.startswith("bedrock/") and not any(k in model for k in TOP_LEVEL_CACHE):
+            mark_cache(messages); caching = {"system": [{**system[0], "cache_control": {"type": "ephemeral"}}]}
+        else: caching = {"system": system, "cache_control": {"type": "ephemeral"}}
         try:
-            with client.messages.stream(model=model, max_tokens=64000, system=system, tools=TOOLS, messages=messages,
-                                        thinking={"type": "adaptive", "display": "summarized"}, output_config={"effort": effort},
-                                        cache_control={"type": "ephemeral"}) as stream:
+            with client.messages.stream(model=model, max_tokens=64000, tools=TOOLS, messages=messages, **caching,
+                                        thinking={"type": "adaptive", "display": "summarized"}, output_config={"effort": effort}) as stream:
                 r = stream.get_final_message()
         except anthropic.APIStatusError as e: stop(1, f"model API error {e.status_code} from {model}: {e.message}")
         except anthropic.APIConnectionError as e: stop(1, f"model API unreachable ({model}): {e}")

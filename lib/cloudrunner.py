@@ -84,9 +84,11 @@ def archive(ev):
     bucket = os.environ.get("HR_RUNS_BUCKET")
     if bucket:
         for source, prefix in ((Path(evals.RUNS, ev["run"]), "runs/" + ev["run"]),
-                               (Path(evals._path(ev["id"])), "evals/" + ev["id"])):
+                               (Path(evals._path(ev["id"])), "evals/" + ev["id"]),
+                               (Path(evals.DATA, "work", "jobs", ev["id"], ev["harness"], "agent"), f"evals/{ev['id']}/recipe-agent")):
             if source.is_dir():
-                command(["aws", "s3", "sync", str(source), f"s3://{bucket}/{prefix}/", "--exclude", "model-credentials/*", "--only-show-errors"])
+                command(["aws", "s3", "sync", str(source), f"s3://{bucket}/{prefix}/", "--exclude", "model-credentials/*",
+                         "--exclude", "*/.trial/*", "--only-show-errors"])
     bucket = os.environ.get("HR_RECIPES_BUCKET")
     if bucket:
         command(["aws", "s3", "sync", str(Path(evals.HERE, "recipes")), f"s3://{bucket}/recipes/", "--only-show-errors"])

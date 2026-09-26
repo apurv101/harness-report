@@ -216,6 +216,13 @@ points the launch template at its content hash. The instance installs Docker,
 Python dependencies and the Claude CLI, then launches `hr-agentd` under systemd.
 The analyzer uses Bedrock through the instance role. `runner_model` and
 `runner_analyzer_model` select model IDs; the account must have access to them.
+`runner_analyzer` (default `agent`) makes an uncached recipe the recipe agent's job
+(`lib/recipe_agent.py`): it builds and runs the harness on the worker's own Docker until
+the harness reaches the model, on `runner_recipe_agent_model` (default Sonnet 4.6, the
+best model this account serves; it refuses Opus 5 and Fable 5.1), and falls back to
+`runner_analyzer_model` when a request is refused. Its session is archived to
+`evals/<id>/recipe-agent/` in the runs bucket. `runner_analyzer = "claude"` restores the
+single `claude -p` call.
 
 The private GitHub clone key is read from the existing SSM parameter. It never
 enters a queue or Terraform state. The proxy receives a renewable session for a

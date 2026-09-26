@@ -162,9 +162,25 @@ variable "runner_model" {
 }
 
 variable "runner_analyzer_model" {
-  description = "Bedrock inference profile used by the Claude CLI for uncached recipes."
+  description = "Bedrock inference profile used by the Claude CLI for uncached recipes (runner_analyzer = claude), and the recipe agent's fallback when its model refuses a request."
   type        = string
   default     = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+}
+
+variable "runner_analyzer" {
+  description = "How workers write an uncached recipe: agent (lib/recipe_agent.py builds and runs the harness until it reaches the model) or claude (one claude -p call)."
+  type        = string
+  default     = "agent"
+  validation {
+    condition     = contains(["agent", "claude"], var.runner_analyzer)
+    error_message = "runner_analyzer is agent or claude."
+  }
+}
+
+variable "runner_recipe_agent_model" {
+  description = "The recipe agent's model, bedrock/<inference profile>. This account serves Sonnet 4.6 but refuses Opus 5 and Fable 5.1 (checked 2026-09-25)."
+  type        = string
+  default     = "bedrock/us.anthropic.claude-sonnet-4-6"
 }
 
 variable "runner_max_job_seconds" {

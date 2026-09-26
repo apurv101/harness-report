@@ -12,7 +12,8 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 . "$HERE/lib/common.sh"; . "$HERE/lib/recipe.sh"; . "$HERE/lib/proxy.sh"; . "$HERE/lib/execute.sh"
 [ -f "$HERE/.env" ] && eval "$(python3 "$HERE/lib/dotenv.py" "$HERE/.env")"
-PLATFORM="${HR_PLATFORM:-linux/amd64}"; JOB_LABEL=(); T0=$(date +%s)
+PLATFORM="${HR_PLATFORM:-linux/amd64}"; T0=$(date +%s)
+JOB_LABEL=(); [ -z "${HR_LOCAL_EVAL_ID:-}" ] || JOB_LABEL=(--label "hr.evaluation=$HR_LOCAL_EVAL_ID")
 HR_EVENTS=""   # a trial is not a stage of the run the site is following
 
 case "${1:-}" in

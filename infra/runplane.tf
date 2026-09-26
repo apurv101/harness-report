@@ -214,6 +214,8 @@ resource "aws_launch_template" "runner" {
     release_key     = aws_s3_object.runner_release[0].key
     model           = var.runner_model
     analyzer_model  = var.runner_analyzer_model
+    analyzer        = var.runner_analyzer
+    agent_model     = var.runner_recipe_agent_model
     model_role      = aws_iam_role.proxy_model[0].arn
     github_app_id   = var.github_app_id
     secret_prefix   = "/${local.name}/"

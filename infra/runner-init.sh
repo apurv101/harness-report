@@ -14,6 +14,10 @@ rm /tmp/runner.zip
 if ! /opt/hr-venv/bin/python /opt/harness-report/lib/harbor_backend.py check >/dev/null 2>&1; then
   /opt/hr-venv/bin/pip install --quiet -r /opt/harness-report/requirements-harbor.txt
 fi
+# Older prepared images predate the recipe agent's SDK.
+if ! /opt/hr-venv/bin/python -c 'import anthropic' >/dev/null 2>&1; then
+  /opt/hr-venv/bin/pip install --quiet -r /opt/harness-report/requirements-agent.txt
+fi
 if ! docker compose version >/dev/null 2>&1; then
   apt-get update -y
   apt-get install -y docker-compose-plugin
@@ -22,6 +26,10 @@ cat > /opt/harness-report/.env <<'ENVFILE'
 MODEL=${model}
 ANALYZER_MODEL=${analyzer_model}
 CLAUDE_CODE_USE_BEDROCK=1
+ANALYZER=${analyzer}
+RECIPE_AGENT_MODEL=${agent_model}
+RECIPE_AGENT_FALLBACK=bedrock/${analyzer_model}
+RECIPE_AGENT_MAX_SECONDS=2700
 ENVFILE
 cat > /etc/harness-report.env <<'ENVFILE'
 PATH=/opt/hr-venv/bin:/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -41,6 +49,7 @@ HR_SCALER_FUNCTION=${scaler_function}
 HR_SECRET_PREFIX=${secret_prefix}
 HR_MAX_JOB_SECONDS=${max_seconds}
 HR_DATA_DIR=/var/lib/hr/data
+HR_AGENT_PYTHON=/opt/hr-venv/bin/python
 HARBOR_TASKS=/var/lib/hr/tasks
 HR_PLATFORM=linux/amd64
 GITHUB_APP_ID=${github_app_id}

@@ -2,7 +2,7 @@
 # Secrets, local users, task data, results and working clones are excluded from the release.
 locals {
   runner_files = toset(concat(
-    ["run.sh", "hr-agentd", "evals.py", "auth.py", "proxy.py", "policy.py", "infra/runner-lifecycle.py", "requirements-harbor.txt"],
+    ["run.sh", "hr-agentd", "evals.py", "auth.py", "proxy.py", "policy.py", "infra/runner-lifecycle.py", "requirements-harbor.txt", "requirements-agent.txt"],
     tolist(fileset("${path.module}/..", "lib/*.py")),
     tolist(fileset("${path.module}/..", "lib/*.sh")),
     tolist(fileset("${path.module}/..", "lib/*.json")),

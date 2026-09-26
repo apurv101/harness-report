@@ -82,7 +82,8 @@ Everything it did is under `work/<name>/agent/<time>/`: `transcript.jsonl` (ever
 `builds/<n>/`, `trials/<n>/` (each harness run's `calls.jsonl`, logs and `changes.txt`) and `verdict.json`. It
 stops at `RECIPE_AGENT_MAX_TURNS` (80), `RECIPE_AGENT_MAX_USD` (25, estimated at list price) or
 `RECIPE_AGENT_MAX_SECONDS` (5400). A refused request moves the rest of the session to `RECIPE_AGENT_FALLBACK`
-(Opus 5). The machine is the local Docker; the tools reach it only through `lib/trial.sh`.
+(Opus 5). The machine is the local Docker; the tools reach it only through `lib/trial.sh`. On AWS the worker VM is
+the machine: `runner_analyzer` and `runner_recipe_agent_model` in `infra/variables.tf` set it up (see CLOUD.md).
 
 ## Harbor tasks
 

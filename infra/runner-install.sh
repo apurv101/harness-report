@@ -17,7 +17,7 @@ systemctl enable --now containerd docker chrony
 systemctl restart docker
 swapoff -a || true
 python3 -m venv /opt/hr-venv
-/opt/hr-venv/bin/pip install --quiet boto3 awscli harbor==0.23.0 toml==0.10.2
+/opt/hr-venv/bin/pip install --quiet boto3 awscli harbor==0.23.0 toml==0.10.2 'anthropic[bedrock]==1.8.0'
 ln -sf /opt/hr-venv/bin/aws /usr/local/bin/aws
 curl -fsSL https://claude.ai/install.sh -o /tmp/install-claude.sh
 CLAUDE_INSTALL_ALLOW_SUDO=1 bash /tmp/install-claude.sh
