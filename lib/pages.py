@@ -141,7 +141,7 @@ def md_harnesses(o):
     rows = [(_link(h["harness"], "harnesses", h["harness"]), h.get("use_case") or (h.get("summary") or "")[:90],
              h.get("runs"), h.get("tasks_tried"), (h.get("last_run") or "")[:10])
             for h in o["harnesses"]]
-    return ("# Harnesses\n\nEvery agent harness that has been run here, most runs first.\n\n"
+    return ("# Harnesses\n\nAgent harnesses reviewed or evaluated here, most runs first.\n\n"
             + _table(["harness", "what it is", "runs", "tasks tried", "last run"], rows) + FOOTER)
 
 
@@ -149,6 +149,14 @@ def md_harness(o):
     h, p, r = o["harness"], o.get("profile") or {}, o.get("recommendations") or {}
     lines = [f"# {h['harness']}", ""]
     if p.get("use_case"): lines += [f"> {p['use_case']}", ""]
+    compatibility = h.get("compatibility") or {}
+    if compatibility:
+        lines += [f"## {'Needs integration' if compatibility.get('status') == 'blocked' else 'Compatibility'}", "",
+                  compatibility.get("summary") or "", ""]
+        lines += [f"- {reason}" for reason in compatibility.get("blockers") or []]
+        lines += ["", _table(["check", "result", "detail"], [
+            (check.get("name"), check.get("status"), check.get("detail"))
+            for check in compatibility.get("checks") or []])]
     lines += [f"- repo: {h.get('repo')}", f"- commit: {h.get('commit')}", f"- api style: {h.get('api_style')}",
               f"- runs: {h.get('runs')} ({h.get('scored')} with a reward)", f"- tasks tried: {h.get('tasks_tried')}",
               f"- models: {', '.join(h.get('models') or [])}"]
@@ -160,7 +168,7 @@ def md_harness(o):
     lines += ["", "## Results by task", "", _table(["task", "runs", "last reward", "best reward", "last tests"], [
         (_link(k, "tasks", *k.split("/", 1)), v.get("runs"), v.get("last_reward"), v.get("best_reward"), _summary(v.get("last_tests")))
         for k, v in sorted(res.items())])]
-    if r.get("recs"):
+    if r.get("recs") and compatibility.get("status") != "blocked":
         lines += ["## Tests to run next", "", f"_ranked by {r.get('source')}_", "",
                   _table(["task", "why"], [(_link(f"{x['taskset']}/{x['task']}", "tasks", x["taskset"], x["task"]), x.get("why"))
                                            for x in r["recs"]])]
@@ -228,7 +236,7 @@ def resolve(parts, q=None):
     q = q or {}
     one = lambda k: (q.get(k) or [None])[0]
     if parts == ["harnesses"]:
-        o = harnesses(); return o, md_harnesses(o), "Harnesses", f"{len(o['harnesses'])} agent harnesses run on real tasks, with every model call recorded."
+        o = harnesses(); return o, md_harnesses(o), "Harnesses", f"{len(o['harnesses'])} agent harnesses reviewed or evaluated, with recorded results where available."
     if len(parts) == 2 and parts[0] == "harnesses":
         o = harness(parts[1])
         if not o: return None

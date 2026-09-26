@@ -1,0 +1,68 @@
+bun test v1.4.2 (744846f84)
+
+src/setup/secrets.test.ts:
+(pass) providerForModelKey > tells providers apart by key prefix [0.05ms]
+
+src/db/migrations.test.ts:
+(pass) bundled migrations > match drizzle/ (run `bun run db:generate` after changing the schema) [0.27ms]
+
+src/brain/codemode/quickjs-executor.test.ts:
+(pass) QuickJSExecutor > runs code against tool namespaces and returns the result [22.42ms]
+(pass) QuickJSExecutor > passes arguments and runs calls in parallel [18.35ms]
+(pass) QuickJSExecutor > surfaces tool and code errors as results, never throws [53.02ms]
+(pass) QuickJSExecutor > has no network and no host globals [19.15ms]
+(pass) QuickJSExecutor > interrupts runaway loops and times out hung calls [2222.01ms]
+(pass) QuickJSExecutor > turns connector pause and error signals into throws [55.52ms]
+(pass) QuickJSExecutor > runs provider preludes and rejects reserved names [19.32ms]
+
+src/brain/slack/membership-provenance.test.ts:
+(pass) shared Slack membership provenance > retains provenance when the creating mapping is revoked first [0.21ms]
+(pass) shared Slack membership provenance > retains provenance when the adopting mapping is revoked first [0.01ms]
+
+src/brain/slack/triage.test.ts:
+(pass) parseTriageResult > accepts ANSWER output without an optional audit reason [0.64ms]
+(pass) parseTriageResult > accepts ANSWER output with a Reason audit reason [0.14ms]
+(pass) parseTriageResult > accepts ANSWER output with a reason audit reason [0.02ms]
+(pass) parseTriageResult > accepts ANSWER output with a ReAsOn audit reason [0.01ms]
+(pass) parseTriageResult > accepts ANSWER output with both fallback and an audit reason [0.05ms]
+(pass) parseTriageResult > parses the main-agent effort [0.03ms]
+(pass) parseTriageResult > keeps malformed ANSWER output on the safe fallback path [0.02ms]
+(pass) parseTriageResult > keeps malformed ANSWER output on the safe fallback path [0.01ms]
+(pass) parseTriageResult > keeps malformed ANSWER output on the safe fallback path
+
+src/brain/slack/farewell.test.ts:
+[slack] farewell retryable team=T1 channel=C-home error=ratelimited
+(pass) postSlackFarewell > posts to #company-brain found from the bot's channels and holds on rate limit [1.07ms]
+(pass) postSlackFarewell > reports a deduped repeat as already posted [0.18ms]
+(pass) postSlackFarewell > skips a dead channel instead of blocking the exit [0.02ms]
+
+src/brain/tools/sandbox/availability.test.ts:
+(pass) sandboxToolsConfigured > stays off on the free plan without Daytona [0.01ms]
+(pass) sandboxToolsConfigured > uses Daytona on any plan when its key is set [0.01ms]
+(pass) sandboxToolsConfigured > uses the container once it's switched on [0.02ms]
+
+src/brain/tools/mcp/provider-client.test.ts:
+(pass) createProviderMcpClient > forwards Code Mode calls through the provider abstraction [0.06ms]
+
+src/brain/tools/mcp/catalog.test.ts:
+(pass) MCP catalog > offers every connector nothing has paused [0.05ms]
+
+src/brain/tools/mcp/reset-retry.test.ts:
+(pass) executeWithResetRetry > retries once when the runtime throws a reset error, then succeeds [0.18ms]
+(pass) executeWithResetRetry > retries once when the runtime returns a reset error output [0.05ms]
+(pass) executeWithResetRetry > does not retry ordinary program errors [0.05ms]
+(pass) executeWithResetRetry > does not retry thrown non-reset errors [0.05ms]
+(pass) executeWithResetRetry > gives up after one retry if the reset persists [0.07ms]
+(pass) executeWithResetRetry > surfaces a persistent reset error output after one retry [0.04ms]
+(pass) executeWithResetRetry > retries a durable object storage reset [0.04ms]
+(pass) executeWithResetRetry > never retries a memory-limit reset — it would re-OOM [0.03ms]
+(pass) executeWithResetRetry > does not retry a thrown memory-limit reset [0.03ms]
+(pass) executeWithResetRetry > passes paused outputs through untouched [0.03ms]
+
+src/brain/tools/mcp/google/gmail-bcc.test.ts:
+(pass) embedded Gmail hidden recipients > does not advertise or accept Bcc recipients [0.12ms]
+
+ 39 pass
+ 0 fail
+ 78 expect() calls
+Ran 39 tests across 11 files. [2.44s]

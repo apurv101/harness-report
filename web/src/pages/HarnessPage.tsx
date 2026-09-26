@@ -23,6 +23,7 @@ export function HarnessPage() {
   if (!data) return <RunsShell crumb={crumb}><p className="empty" role="status">Loading…</p></RunsShell>
 
   const h = data.harness; const p = data.profile; const recs = data.recommendations
+  const compatibility = h.compatibility
   const repo = h.repo?.replace('https://github.com/', '') || null
   const results = Object.entries(h.results || {}).sort(([a], [b]) => a.localeCompare(b))
   return (
@@ -35,6 +36,13 @@ export function HarnessPage() {
         {(p?.domains || []).map(d => <span key={d}> <Pill>{d}</Pill></span>)}
         {(p?.languages || []).map(l => <span key={l}> <Pill>{l}</Pill></span>)}
       </div>
+      {compatibility && <section aria-label="Compatibility">
+        <h2>{compatibility.status === 'blocked' ? 'Needs integration' : 'Compatibility'}</h2>
+        <p>{compatibility.summary}</p>
+        {!!compatibility.blockers?.length && <ul>{compatibility.blockers.map(reason => <li key={reason}>{reason}</li>)}</ul>}
+        {!!compatibility.checks?.length && <ul>{compatibility.checks.map(check =>
+          <li key={check.name}><strong>{check.name}</strong>: {check.detail}</li>)}</ul>}
+      </section>}
       <Facts>
         <Fact name="runs" value={h.runs} />
         <Fact name="with a reward" value={`${h.scored ?? 0} of ${h.finished}`} />
@@ -44,13 +52,13 @@ export function HarnessPage() {
         <Fact name="model" value={(h.models || []).map(shortModel).join(', ')} />
       </Facts>
 
-      <h2>Tests to run next</h2>
+      {compatibility?.status !== 'blocked' && <><h2>Tests to run next</h2>
       {recs?.recs?.length
         ? <>
             <p className="muted small">Picked for what {h.harness} is for{recs.source === 'llm' ? ', by a model reading its profile and results' : ', by rules on its profile and results'}.</p>
             <RecList recs={recs.recs} repo={repo} />
           </>
-        : <p className="muted">Recommendations appear after the first run.</p>}
+        : <p className="muted">Recommendations appear after the first run.</p>}</>}
 
       <h2>Results by task</h2>
       {results.length ? (

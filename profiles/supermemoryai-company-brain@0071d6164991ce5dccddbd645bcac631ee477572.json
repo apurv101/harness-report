@@ -1,0 +1,75 @@
+{
+  "repo": "https://github.com/supermemoryai/company-brain",
+  "commit": "0071d6164991ce5dccddbd645bcac631ee477572",
+  "use_case": "A Slack teammate that remembers company knowledge, researches questions, and works through connected tools.",
+  "domains": [
+    "enterprise-ops",
+    "web-research",
+    "tool-use",
+    "office-docs"
+  ],
+  "languages": [
+    "javascript",
+    "python",
+    "typescript"
+  ],
+  "capabilities": [
+    "reads-docs",
+    "calls-apis",
+    "browses-web",
+    "runs-shell",
+    "edits-files",
+    "uses-git",
+    "long-horizon"
+  ],
+  "not_for": [
+    "Direct execution inside a Harbor task container without a task adapter.",
+    "Offline company-memory tasks without a configured memory service."
+  ],
+  "evidence": "README.md; src/brain/turn/agent.ts and agent.impl.ts (Cloudflare Durable Object and debugTurn); src/routes/index.ts (HTTP routes); src/brain/tools/sandbox/{availability,client}.ts (Cloudflare/Daytona file tools); src/brain/turn/brain-model.ts (model clients). Capabilities describe the application with its required services configured.",
+  "source": "source review and isolated Docker checks",
+  "at": "2026-09-26T03:56:44.208285+00:00",
+  "compatibility": {
+    "status": "blocked",
+    "summary": "Added for evaluation. The application builds, its Bun tests pass, and it starts locally; benchmark runs need a Cloudflare task adapter.",
+    "blockers": [
+      "Task delivery: the release accepts Slack events and internal worker calls, but has no command-line task entrypoint. An adapter must submit a task and capture completion.",
+      "Task files: its shell and file tools use Cloudflare or Daytona sandboxes. They need access to the same files and state that the benchmark grader examines.",
+      "Memory and tools: evaluation needs isolated company data, memory-service access, and task-scoped connections. These were not provisioned by the setup checks."
+    ],
+    "checks": [
+      {
+        "name": "Dependency installation",
+        "status": "passed",
+        "detail": "Frozen lockfile installed successfully."
+      },
+      {
+        "name": "Bun tests",
+        "status": "passed",
+        "detail": "39 tests passed across all 11 files using the shipped Bun configuration."
+      },
+      {
+        "name": "Package test command",
+        "status": "failed",
+        "detail": "With Node 22, 31 tests passed; two suites could not load their TypeScript path aliases."
+      },
+      {
+        "name": "Application build",
+        "status": "passed",
+        "detail": "Worker and web application built successfully in a dry run."
+      },
+      {
+        "name": "Local startup",
+        "status": "passed",
+        "detail": "Node 22 worker applied its database migration and returned HTTP 200 with ok=true from /health."
+      },
+      {
+        "name": "Benchmark evaluation",
+        "status": "not_run",
+        "detail": "No agent benchmark run or reward recorded; the task adapter is not implemented."
+      }
+    ],
+    "recording": "The installed @ai-sdk/anthropic 3.0.98 supports ANTHROPIC_BASE_URL. A complete worker-to-recording-proxy model turn has not been tested.",
+    "evidence": "catalog/harness-checks/supermemoryai-company-brain@0071d6164991ce5dccddbd645bcac631ee477572"
+  }
+}

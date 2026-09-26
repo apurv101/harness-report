@@ -342,6 +342,12 @@ export interface HarnessProfile {
 
 export interface HarnessCard {
   harness: string
+  compatibility?: {
+    status: 'blocked' | 'ready'
+    summary: string
+    blockers?: string[]
+    checks?: { name: string; status: string; detail: string }[]
+  } | null
   repo?: string | null
   commit?: string | null
   api_style?: string | null

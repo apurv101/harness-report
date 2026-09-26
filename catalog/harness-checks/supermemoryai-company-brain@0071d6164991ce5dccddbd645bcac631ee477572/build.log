@@ -1,0 +1,33 @@
+$ wrangler deploy --dry-run --outdir dist
+
+ ⛅️ wrangler 4.135.0
+────────────────────
+▲ [WARNING] Processing wrangler.jsonc configuration:
+
+    - "unsafe" fields are experimental and may change or break at any time.
+
+
+[custom build] Running: bun run build:web
+[custom build] $ bun web/build.ts
+[custom build] 
+[custom build] web: 4 files → dist/web
+[custom build] 
+✨ Read 11 files from the assets directory /tmp/company-brain/dist/web
+Total Upload: 5558.63 KiB / gzip: 1646.17 KiB
+Your Worker has access to the following bindings:
+Binding                                                 Resource                     
+env.COMPANY_BRAIN_AGENT (CompanyBrainAgent)             Durable Object               
+env.Sandbox (Sandbox)                                   Durable Object               
+env.BRAIN_KV (company_brain_kv)                         KV Namespace                 
+env.DB (company-brain)                                  D1 Database                  
+env.AI                                                  AI                           
+env.ASSETS                                              Assets                       
+env.CF_VERSION_METADATA                                 Worker Version Metadata      
+env.GMAIL_FETCH_RATE_LIMITER (ratelimit)                Unsafe Metadata              
+env.GRANOLA_FETCH_RATE_LIMITER (ratelimit)              Unsafe Metadata              
+env.CONTAINER_SANDBOX ("off")                           Environment Variable         
+env.SANDBOX_TRANSPORT ("rpc")                           Environment Variable         
+
+--dry-run: exiting now.
+
+Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md

@@ -71,6 +71,7 @@ ROOT = os.path.dirname(HERE)
 DATA = os.path.abspath(os.environ.get("HR_DATA_DIR") or ROOT)
 RUNS = os.path.join(DATA, "runs")
 RECIPES = os.environ.get("HR_RECIPE_DIR") or os.path.join(ROOT, "recipes")
+PROFILES = os.path.join(ROOT, "profiles")
 EVALS = os.path.join(DATA, "evals")
 
 GSI, TASK_GSI = "harness", "task"
@@ -435,7 +436,10 @@ def harness_card(name):
                               lambda c: f"{(c.get('task') or {}).get('taskset')}/{(c.get('task') or {}).get('name')}")
     finished = [c for c in runs if _outcome(c) != "running"]
     profile = strip(ddb.get(harness_pk(name), "PROFILE")) or None
-    return {"harness": name, "repo": h.get("repo"), "commit": h.get("commit") or rec.get("commit"),
+    commit = h.get("commit") or rec.get("commit") or (profile or {}).get("commit")
+    compatibility = (profile or {}).get("compatibility") if (profile or {}).get("commit") == commit else None
+    return {"harness": name, "repo": h.get("repo") or (profile or {}).get("repo"), "commit": commit,
+            "compatibility": compatibility,
             "api_style": h.get("api_style") or rec.get("api_style"), "summary": rec.get("summary"),
             "recipe": rec.get("recipe"), "base_image": rec.get("base_image"), "recipes": len(recipes),
             "runs": len(runs), "finished": len(finished), "scored": sum(1 for c in finished if _outcome(c) == "scored"),
@@ -450,7 +454,7 @@ def harness_card(name):
 def publish_harness(name):
     if not name: return 0
     card = harness_card(name)
-    if not card["runs"] and not card["recipes"]: return 0
+    if not card["runs"] and not card["recipes"] and not card["repo"]: return 0
     return ddb.batch_put([{**card, "pk": HARNESSLIST, "sk": harness_pk(name)},
                           fit({**card, "pk": harness_pk(name), "sk": "META"}, ())])
 
@@ -458,6 +462,26 @@ def publish_harness(name):
 def publish_profile(name, profile):
     ddb.put({**profile, "harness": name, "pk": harness_pk(name), "sk": "PROFILE"})
     publish_harness(name)
+
+
+def saved_profiles(pattern=None):
+    """Restore reviewed harnesses even when integration has not produced a run or recipe.
+
+    Prefer evidence for the currently recorded run/recipe commit; never attach a
+    different revision's compatibility finding to an already evaluated harness.
+    """
+    grouped = {}
+    for filename in sorted(os.listdir(PROFILES) if os.path.isdir(PROFILES) else []):
+        match = RECIPE_FILE.match(filename)
+        if not match or (pattern and not re.search(pattern, match["name"])): continue
+        profile = load_json(os.path.join(PROFILES, filename)) or {}
+        if profile.get("commit") != match["commit"]: continue
+        grouped.setdefault(match["name"], []).append(profile)
+    for name, profiles in grouped.items():
+        card = harness_card(name)
+        if card["runs"] or card["recipes"]:
+            profiles = [p for p in profiles if p["commit"] == card["commit"]]
+        if profiles: yield name, max(profiles, key=lambda p: p.get("at") or "")
 
 
 def publish_recs(name, recs):
@@ -744,6 +768,9 @@ def cmd_sync(a):
             if ts and name and (not a.grep or re.search(a.grep, ts)): refresh_task(ts, name)
         names = {(c.get("harness") or {}).get("name") for c in cards}
         names |= {c.get("harness") for c in ddb.query(RECIPELIST, "RECIPE#", attributes=["harness"])}
+        for name, profile in saved_profiles(a.grep):
+            ddb.put({**profile, "harness": name, "pk": harness_pk(name), "sk": "PROFILE"})
+            names.add(name); items += 1
         for name in sorted(x for x in names if x and (not a.grep or re.search(a.grep, x))):
             k = publish_harness(name); n += 1; items += k
             if not a.quiet: print(f"  harness {name}  ({k} rows)")

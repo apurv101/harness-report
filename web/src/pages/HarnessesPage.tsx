@@ -26,7 +26,7 @@ export function HarnessesPage() {
       <div className="run-list-head">
         <div>
           <h1 tabIndex={-1}>Harnesses</h1>
-          <p>{data.harnesses.length} agent harnesses, each run from its GitHub repo on real tasks</p>
+          <p>{data.harnesses.length} agent harnesses reviewed or evaluated from their GitHub repos</p>
         </div>
         <Link className="ui-btn primary" to="/connect">Evaluate yours ↗</Link>
       </div>
@@ -40,7 +40,8 @@ export function HarnessesPage() {
                 <tr key={h.harness}>
                   <td><Link className="run-name" to={`/harnesses/${encodeURIComponent(h.harness)}`}>{h.harness}</Link>
                     {h.repo && <span className="run-id">{h.repo.replace('https://github.com/', '')}</span>}</td>
-                  <td className="run-task">{truncate(h.use_case || h.summary || '', 110)}</td>
+                  <td className="run-task">{truncate(h.use_case || h.summary || '', 110)}
+                    {h.compatibility?.status === 'blocked' && <span className="run-id">Needs integration</span>}</td>
                   <td className="num">{h.runs}</td>
                   <td className="num">{h.tasks_tried}</td>
                   <td className="mono small">{(h.last_run || '').slice(0, 10)}</td>
