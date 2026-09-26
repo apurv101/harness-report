@@ -38,6 +38,8 @@ folder, is Python beside it — so the shell stays the plumbing and the formats 
 | `lib/proxy.sh` | stage 5 — the `hr-proxy` image, the two networks, one proxy container per run, the phase switch |
 | `lib/execute.sh` | stage 6 — `run_one`: the agent, then the verifier, then the run's result |
 | `lib/analyze-prompt.md`, `lib/recipe-schema.json` | what the analyzer is asked, and the shape it must answer with |
+| `lib/recipe_agent.py`, `lib/recipe-agent-prompt.md` | the analyze stage as a tool loop (`ANALYZER=agent`): the model reads the repo, builds, runs the harness through the proxy, and fixes the recipe until the harness reaches the model |
+| `lib/trial.sh` | the recipe agent's build, harness run and one-off command, through `build_overlay`, `start_proxy` and `agent_phase` |
 | `lib/report.py` | the `runs` table, the `view` conversation, the task × k reward table |
 | `lib/recipe.py` | validate the analyzer's output, read fields, hash, env substitution, the diff against the previous recipe |
 | `lib/runjson.py` | `run.json` in three passes: origin, provenance, result |
@@ -49,7 +51,7 @@ folder, is Python beside it — so the shell stays the plumbing and the formats 
 |---|---|---|
 | fetch | shallow `git clone` | `work/<name>/repo/` |
 | select | (Harbor mode) resolve the taskset and the chosen tasks, route Compose tasks to the pinned Harbor backend, build the first task image | image `hr-task/<taskset>:<task>` |
-| analyze | `claude -p` reads the repo and returns a recipe as JSON: an overlay Dockerfile (`ARG BASE` / `FROM ${BASE}`) that installs the harness self-contained under `/opt/harness`, the env that points the harness at the proxy, the command that runs one task from `$TASK`, a check command, and a fallback base image | `work/<name>/recipe.json`, `Dockerfile`, `run-harness` |
+| analyze | `claude -p` reads the repo and returns a recipe as JSON: an overlay Dockerfile (`ARG BASE` / `FROM ${BASE}`) that installs the harness self-contained under `/opt/harness`, the env that points the harness at the proxy, the command that runs one task from `$TASK`, a check command, and a fallback base image. With `ANALYZER=agent` the recipe agent does it instead and returns only a recipe it has built and run until the harness reached the model | `work/<name>/recipe.json`, `Dockerfile`, `run-harness`; agent: `work/<name>/agent/<time>/` |
 | build | `docker build` of the overlay FROM the fallback base and, in Harbor mode, FROM the first task image; the check command runs in both with no network; a failure is fed back to the AI, three tries | images `hr-<name>` and `hr-<name>/<taskset>:<task>` |
 | proxy | `proxy.py` in its own container on the `hr-net` network with `~/.aws` mounted read-only; the harness container never holds credentials | |
 | run | the sandbox runs the task with the recipe's env, cwd = the task's working directory; the proxy appends every call to `calls.jsonl` | `runs/<run-id>/` |
@@ -57,6 +59,30 @@ folder, is Python beside it — so the shell stays the plumbing and the formats 
 
 The recipe is reused on the next run of the same repo, so the AI runs once per harness. Overlay images are
 cached per harness x task image.
+
+## The recipe agent
+
+`claude -p` writes a recipe from reading the repo and learns whether it works only when the build fails. With
+`ANALYZER=agent` in `.env`, `lib/recipe_agent.py` runs the analyze stage as a loop over the Messages API instead:
+the model reads the repo, calls `build` (the pipeline's own `build_overlay` and check), calls `run_harness` (the
+harness from that build, through the recording proxy and `MODEL`, on the first task or a small probe), reads the
+logs, changes the recipe and runs it again. `submit` is refused until a build has passed its check *and* a harness
+run from it made at least one model call, so a wrapper that only passes `--help` cannot be returned. `give_up`
+records that a harness cannot run here and stops the pipeline with the reason.
+
+```sh
+uv venv .venv-agent && uv pip install --python .venv-agent/bin/python -r requirements-agent.txt
+# .env
+ANALYZER=agent
+RECIPE_AGENT_MODEL=bedrock/us.anthropic.claude-fable-5-1   # or anthropic/claude-fable-5-1 with ANTHROPIC_API_KEY
+RECIPE_AGENT_AWS_PROFILE=operator                          # default AWS_PROFILE
+```
+
+Everything it did is under `work/<name>/agent/<time>/`: `transcript.jsonl` (every turn and tool result),
+`builds/<n>/`, `trials/<n>/` (each harness run's `calls.jsonl`, logs and `changes.txt`) and `verdict.json`. It
+stops at `RECIPE_AGENT_MAX_TURNS` (80), `RECIPE_AGENT_MAX_USD` (25, estimated at list price) or
+`RECIPE_AGENT_MAX_SECONDS` (5400). A refused request moves the rest of the session to `RECIPE_AGENT_FALLBACK`
+(Opus 5). The machine is the local Docker; the tools reach it only through `lib/trial.sh`.
 
 ## Harbor tasks
 

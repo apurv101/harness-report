@@ -18,15 +18,21 @@ import difflib, hashlib, json, os, re, sys, tempfile
 FIELDS = ("base_image", "dockerfile", "run_command", "check_command", "env", "api_style")
 
 
+def overlay_error(dockerfile):
+    """Why this dockerfile is not an overlay (ARG BASE / FROM ${BASE}), or None when it is."""
+    lines = [l.strip() for l in dockerfile.splitlines() if l.strip() and not l.strip().startswith("#")]
+    if len(lines) > 1 and re.match(r"ARG\s+BASE(=|\s|$)", lines[0]) and re.match(r"FROM\s+(--platform=\S+\s+)?\$\{?BASE\}?(\s|$)", lines[1]):
+        return None
+    return "recipe rejected: the dockerfile must begin with 'ARG BASE=<base_image>' then 'FROM ${BASE}' (it is an overlay built on top of an image chosen at build time). It began with:\n" + "\n".join(lines[:3])
+
+
 def save(args):
     """Validate the analyzer's structured output, then write recipe.json and the overlay Dockerfile."""
     raw, recipe, dockerfile = args
     d = json.load(open(raw))
     so = d.get("structured_output")
     if not so: sys.exit(f"analyze: no structured output (subtype={d.get('subtype')}, result={str(d.get('result'))[:300]})")
-    lines = [l.strip() for l in so["dockerfile"].splitlines() if l.strip() and not l.strip().startswith("#")]
-    if not (len(lines) > 1 and re.match(r"ARG\s+BASE(=|\s|$)", lines[0]) and re.match(r"FROM\s+(--platform=\S+\s+)?\$\{?BASE\}?(\s|$)", lines[1])):
-        sys.exit("recipe rejected: the dockerfile must begin with 'ARG BASE=<base_image>' then 'FROM ${BASE}' (it is an overlay built on top of an image chosen at build time). It began with:\n" + "\n".join(lines[:3]))
+    if err := overlay_error(so["dockerfile"]): sys.exit(err)
     json.dump(so, open(recipe, "w"), indent=2)
     open(dockerfile, "w").write(so["dockerfile"].rstrip() + "\n")
     print(f"recipe: api={so['api_style']}  base={so['base_image']}  env={' '.join(e['name'] for e in so['env'])}  cost=${d.get('total_cost_usd', 0):.2f}  turns={d.get('num_turns')}")

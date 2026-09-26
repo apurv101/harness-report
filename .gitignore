@@ -12,3 +12,4 @@ web/dist/
 /profiles/.*.lock
 
 .venv-harbor/
+.venv-agent/

@@ -31,18 +31,7 @@ run_one() {
     run_harbor
     return
   fi
-  local ENV_ARGS=(); while IFS= read -r kv; do ENV_ARGS+=(-e "$kv"); done < <(python3 "$HERE/lib/recipe.py" env "$RECIPE" "$PROXY_URL")
-  stage run "$TASKNAME  cwd=$WORKDIR  timeout=${AGENT_T}s  $RUN_CMD"
-  CUR_RUN="hr-run-$RUN"; docker rm -f "$CUR_RUN" >/dev/null 2>&1 || true
-  local LOGS_MOUNT=(); [ -z "$TDIR" ] || LOGS_MOUNT=(-v "$OUT:/logs")   # Harbor: /logs/agent, /logs/verifier/reward.txt
-  docker run -d ${JOB_LABEL[@]+"${JOB_LABEL[@]}"} --platform "$PLATFORM" --name "$CUR_RUN" --network "$HNET" -w "$WORKDIR" ${RES_ARGS[@]+"${RES_ARGS[@]}"} \
-    -v "$OUT:/out" ${LOGS_MOUNT[@]+"${LOGS_MOUNT[@]}"} -v "$INSTR:/task/instruction.md:ro" -v "$WRAPPER:/usr/local/bin/run-harness:ro" \
-    -e "PROXY_URL=$PROXY_URL" -e "HR_PATH=$(image_path "$OTAG")" -e TEST_DIR=/tests ${HENV[@]+"${HENV[@]}"} ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} "$OTAG" sleep infinity >/dev/null
-  local START; START=$(date +%s); set +e
-  with_timeout "$AGENT_T" docker exec -w "$WORKDIR" "$CUR_RUN" bash -lc "${PRELUDE}run-harness $WORKDIR /task/instruction.md" 2>"$OUT/stderr.log" | tee "$OUT/stdout.log"
-  RC=${PIPESTATUS[0]}; set -e
-  SECS=$(( $(date +%s) - START ))
-  { [ "$RC" = 124 ] || [ "$RC" = 142 ]; } && echo "agent hit the ${AGENT_T}s budget (recorded, not fatal)"
+  agent_phase
   REWARD=null; VRC=""
   if [ -n "$TDIR" ]; then
     # tests enter the container only now, after the agent is done, so the agent can never read them (Harbor does the same)
@@ -67,6 +56,24 @@ run_one() {
   emit type result run "$RUN" task "$TASKNAME" rc "$RC" reward "$REWARD" seconds "$SECS"
   # and the whole run: the card again, every model call, the egress, the verifier's tests, the files
   store publish "$OUT"
+}
+
+# agent_phase: the harness container on the proxy's network, then run-harness with the task until it exits or AGENT_T
+# runs out.  Uses RECIPE PROXY_URL RUN OUT TDIR INSTR WRAPPER OTAG WORKDIR HNET HENV RES_ARGS AGENT_T; sets CUR_RUN RC SECS.
+# run_one calls it, and so does lib/trial.sh, so the recipe agent's trial runs start the harness the way evaluations do.
+agent_phase() {
+  local ENV_ARGS=(); while IFS= read -r kv; do ENV_ARGS+=(-e "$kv"); done < <(python3 "$HERE/lib/recipe.py" env "$RECIPE" "$PROXY_URL")
+  stage run "$TASKNAME  cwd=$WORKDIR  timeout=${AGENT_T}s  $RUN_CMD"
+  CUR_RUN="hr-run-$RUN"; docker rm -f "$CUR_RUN" >/dev/null 2>&1 || true
+  local LOGS_MOUNT=(); [ -z "$TDIR" ] || LOGS_MOUNT=(-v "$OUT:/logs")   # Harbor: /logs/agent, /logs/verifier/reward.txt
+  docker run -d ${JOB_LABEL[@]+"${JOB_LABEL[@]}"} --platform "$PLATFORM" --name "$CUR_RUN" --network "$HNET" -w "$WORKDIR" ${RES_ARGS[@]+"${RES_ARGS[@]}"} \
+    -v "$OUT:/out" ${LOGS_MOUNT[@]+"${LOGS_MOUNT[@]}"} -v "$INSTR:/task/instruction.md:ro" -v "$WRAPPER:/usr/local/bin/run-harness:ro" \
+    -e "PROXY_URL=$PROXY_URL" -e "HR_PATH=$(image_path "$OTAG")" -e TEST_DIR=/tests ${HENV[@]+"${HENV[@]}"} ${ENV_ARGS[@]+"${ENV_ARGS[@]}"} "$OTAG" sleep infinity >/dev/null
+  local START; START=$(date +%s); set +e
+  with_timeout "$AGENT_T" docker exec -w "$WORKDIR" "$CUR_RUN" bash -lc "${PRELUDE}run-harness $WORKDIR /task/instruction.md" 2>"$OUT/stderr.log" | tee "$OUT/stdout.log"
+  RC=${PIPESTATUS[0]}; set -e
+  SECS=$(( $(date +%s) - START ))
+  case "$RC" in 124|142) echo "agent hit the ${AGENT_T}s budget (recorded, not fatal)" ;; esac
 }
 
 # Compose tasks use Harbor's trial lifecycle and our ordinary report/proxy contracts.

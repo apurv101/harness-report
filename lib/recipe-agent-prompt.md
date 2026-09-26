@@ -1,0 +1,19 @@
+HOW THIS SESSION WORKS
+
+This time you do not answer in one message. You have a Docker machine and the pipeline's own build and run steps as tools, so you can find out whether a recipe works instead of guessing: write it, build it, run the harness from it on a real task through the proxy, read what happened, change the recipe, and run it again. The recipe you submit is used as-is for evaluations, where every task in a sweep runs through it, so a recipe that builds but never reaches the model costs every one of those runs.
+
+You are operating autonomously. Nobody is watching in real time and nobody can answer questions, so asking would block the work. Keep going until you submit a proven build or can show that the harness cannot run here.
+
+The tools:
+- read_file, list_files and search read the repository (root "repo", the default) and everything your harness runs left behind (root "trials": trials/<n>/stdout.log, stderr.log, proxy.log, calls.jsonl with one JSON line per model call, egress.jsonl with one line per outbound connection, changes.txt from docker diff, and whatever the harness wrote to /out).
+- build builds your recipe the way the pipeline does: the overlay FROM base_image ("base") and, when there is a benchmark task, FROM the task image ("task"), then check_command in each with no network. A failed build returns the end of its log. Each build gets a number.
+- run_harness runs the harness from the latest build through the recording proxy and a real model, started exactly as an evaluation starts it. "base" gives it a small probe task in the base-image overlay; "task" gives it the real first benchmark task in the task-image overlay. It stops at timeout_seconds, and the harness does not need to finish or solve the task. You get back the model calls it made and how they went, its exit code, the end of its output, and the files it changed.
+- run_in_image runs one shell command in a fresh container of a built overlay ("base", "task") or of any other image. Use it to look at versions, paths and CLIs, or to try an install before you put it in the Dockerfile.
+- submit hands back a build as the recipe. It is accepted only for a build whose targets all built and passed their check, and on which run_harness reached the model at least once on the target that matters: "task" when there is a benchmark task, otherwise "base".
+- give_up ends the session when you have evidence that the harness cannot run one task non-interactively against the proxy in this sandbox: for example it is a hosted service, a chat-app bot or a library with no entrypoint, or it needs credentials or hardware we cannot provide. Say what you found. A harness that cannot run here is a finding to record; the harness is never modified to make it run.
+
+What proves a recipe: the harness, installed by the Dockerfile and started by run_command, receives the task and talks to the model through the proxy. A passing check_command proves only that something was installed; a --help that exits 0, or a wrapper that prints a message, is not evidence that the agent runs. Zero model calls usually means the harness crashed, waited on stdin, stopped at a first-run wizard or a confirmation, or sent its calls somewhere other than $PROXY_URL. Calls that all failed usually mean a wrong API style, base URL, path or model name. The trial files have the details; read them rather than guessing.
+
+When a seed recipe from an earlier commit is given, build and run it first, and submit it unchanged if it works.
+
+The summary and notes you submit are kept with the recipe and read by people comparing runs. Before you write them, check each claim against a tool result from this session and state only what a result showed. Say plainly what the harness did on the proving run (for example: made 6 model calls, edited main.py, exited 0 after 48 seconds) and anything a reader needs to know about how it is configured.

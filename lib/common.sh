@@ -23,4 +23,7 @@ with_timeout() { local s="$1"; shift
 PRELUDE='[ -n "${HR_PATH:-}" ] && export PATH="$HR_PATH"; '
 image_path() { docker image inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1" | sed -n 's/^PATH=//p' | head -1; }
 image_platform() { docker image inspect -f '{{.Os}}/{{.Architecture}}' "$1" 2>/dev/null || true; }
+# uses_bedrock: MODEL or any ROUTES target goes to Bedrock (so the proxy needs AWS credentials)
+uses_bedrock() { local t; for t in "$MODEL" $(printf '%s' "$ROUTES" | tr ',' '\n' | sed -n 's/^[^=]*=//p'); do
+  case "$t" in anthropic|anthropic/*|openai|openai/*) ;; *) return 0 ;; esac; done; return 1; }
 image_label() { docker image inspect -f "{{index .Config.Labels \"$2\"}}" "$1" 2>/dev/null || true; }

@@ -38,6 +38,10 @@
 #                     reads the repo and returns a recipe: an OVERLAY Dockerfile (ARG BASE / FROM ${BASE}) that
 #                     installs the harness self-contained under /opt/harness, the env that points it at the proxy,
 #                     the command that runs one task from $TASK, a check command    → work/<name>/recipe.json
+#                     With ANALYZER=agent the recipe agent (lib/recipe_agent.py) does this stage instead, as a loop:
+#                     it builds each draft, runs the harness from it through the proxy on the first task, reads the
+#                     logs and fixes the recipe, and only returns one the harness reached the model with
+#                     → work/<name>/agent/<time>/ (transcript.jsonl, builds/, trials/, verdict.json)
 #           build     docker build the overlay FROM the recipe's base image and FROM the first task image; the
 #                     check command runs in both; a failure goes back to the AI (3 tries). A recipe that passes is
 #                     saved to recipes/, and its diff against the seed goes into each run folder as recipe.diff.
@@ -66,7 +70,10 @@
 #
 # .env holds MODEL (a target, e.g. bedrock/<model-id>), AWS_PROFILE, AWS_REGION (needed when any target is Bedrock);
 # optional ROUTES, ANTHROPIC_API_KEY / OPENAI_API_KEY (+ ANTHROPIC_BASE_URL / OPENAI_BASE_URL) for the passthrough
-# targets, ANALYZER_MODEL (claude -p model) and HARBOR_TASKS (default ~/Desktop/harbor-tasks).
+# targets, ANALYZER_MODEL (claude -p model) and HARBOR_TASKS (default ~/Desktop/harbor-tasks). ANALYZER=agent picks the
+# recipe agent, configured by RECIPE_AGENT_MODEL (bedrock/<id> | anthropic/<id>, default Fable 5.1 on Bedrock),
+# RECIPE_AGENT_AWS_PROFILE and the other RECIPE_AGENT_* settings in lib/recipe_agent.py; it needs .venv-agent
+# (uv venv .venv-agent && uv pip install --python .venv-agent/bin/python -r requirements-agent.txt).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/lib/common.sh"     # emit, die, help, stage, with_timeout, PRELUDE, the image lookups
@@ -130,13 +137,11 @@ else
 fi
 [ -f "$HERE/.env" ] || die "no .env (MODEL, AWS_PROFILE, AWS_REGION)"
 : "${MODEL:?MODEL in .env or --model}"; ROUTES="${ROUTES:-}"; AWS_REGION="${AWS_REGION:-us-west-2}"
-uses_bedrock() { local t; for t in "$MODEL" $(printf '%s' "$ROUTES" | tr ',' '\n' | sed -n 's/^[^=]*=//p'); do
-  case "$t" in anthropic|anthropic/*|openai|openai/*) ;; *) return 0 ;; esac; done; return 1; }
 case "$EGRESS" in record|none|inspect|open|allow:?*) ;; *) die "--egress: record | none | allow:<hosts> | inspect | open" ;; esac
 case "$POLICY" in flag|enforce|off) ;; *) die "--policy: flag | enforce | off" ;; esac
 if uses_bedrock && [ "${HR_RUNNER_EC2:-0}" != 1 ]; then : "${AWS_PROFILE:?AWS_PROFILE in .env (a route uses Bedrock)}"; fi
 docker info >/dev/null 2>&1 || die "Docker is not running"
-command -v claude >/dev/null || die "claude CLI not found (the analyze stage runs claude -p)"
+[ "${ANALYZER:-claude}" = agent ] || command -v claude >/dev/null || die "claude CLI not found (the analyze stage runs claude -p; ANALYZER=agent uses lib/recipe_agent.py instead)"
 
 [[ "$URL" =~ github\.com[/:]([^/[:space:]]+)/([^/[:space:]#?]+) ]] || die "not a GitHub URL: $URL"
 OWNER="${BASH_REMATCH[1]}"; REPO="${BASH_REMATCH[2]%.git}"
