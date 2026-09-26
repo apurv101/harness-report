@@ -59,3 +59,8 @@ output "worker_capacity_function" {
   description = "Demand controller invoked on submissions and periodically for reconciliation."
   value       = try(aws_lambda_function.scaler[0].function_name, null)
 }
+
+output "visit_log_group" {
+  description = "CloudFront access logs, in us-east-1; admin/ queries this."
+  value       = aws_cloudwatch_log_group.visits.name
+}

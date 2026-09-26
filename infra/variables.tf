@@ -176,3 +176,9 @@ variable "runner_max_job_seconds" {
     error_message = "Job time must be between 60 seconds and 11 hours (below SQS's 12-hour visibility ceiling)."
   }
 }
+
+variable "visit_log_retention_days" {
+  description = "How long CloudFront's per-request visitor logs (IP, path, user agent) are kept in CloudWatch Logs."
+  type        = number
+  default     = 90
+}

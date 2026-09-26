@@ -104,13 +104,15 @@ def real_credentials():
 def _sign(key, msg): return hmac.new(key, msg.encode(), hashlib.sha256).digest()
 
 
-def sigv4(host, service, amz_target, body, key, secret, token):
-    """Signed headers for one POST / of an x-amz-json-1.0 API.  DynamoDB and SQS differ only in the host, the
+def sigv4(host, service, amz_target, body, key, secret, token, region_name=None,
+          content_type="application/x-amz-json-1.0"):
+    """Signed headers for one POST / of an x-amz-json API.  DynamoDB and SQS differ only in the host, the
     service name in the scope, and the target — so both go through here rather than through two copies of the
-    same eighty lines of hmac."""
+    same eighty lines of hmac.  CloudWatch Logs (admin/) also needs its own region and json-1.1."""
+    where = region_name or region()
     now = datetime.datetime.now(datetime.timezone.utc)
     stamp, date = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
-    headers = {"content-type": "application/x-amz-json-1.0", "host": host,
+    headers = {"content-type": content_type, "host": host,
                "x-amz-date": stamp, "x-amz-target": amz_target}
     if token: headers["x-amz-security-token"] = token
     signed = ";".join(sorted(headers))
@@ -119,9 +121,9 @@ def sigv4(host, service, amz_target, body, key, secret, token):
     # something the service will not agree with, and the only symptom is InvalidSignatureException.
     canonical = ("POST\n/\n\n" + "".join(f"{k}:{headers[k].strip()}\n" for k in sorted(headers))
                  + f"\n{signed}\n" + hashlib.sha256(body).hexdigest())
-    scope = f"{date}/{region()}/{service}/aws4_request"
+    scope = f"{date}/{where}/{service}/aws4_request"
     to_sign = "\n".join(["AWS4-HMAC-SHA256", stamp, scope, hashlib.sha256(canonical.encode()).hexdigest()])
-    k = _sign(_sign(_sign(_sign(("AWS4" + secret).encode(), date), region()), service), "aws4_request")
+    k = _sign(_sign(_sign(_sign(("AWS4" + secret).encode(), date), where), service), "aws4_request")
     sig = hmac.new(k, to_sign.encode(), hashlib.sha256).hexdigest()
     headers["authorization"] = (f"AWS4-HMAC-SHA256 Credential={key}/{scope}, SignedHeaders={signed}, Signature={sig}")
     return headers
